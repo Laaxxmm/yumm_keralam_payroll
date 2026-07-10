@@ -128,7 +128,6 @@ $("empBody").addEventListener("click", (e) => {
      togglestatus: () => toggleStatus(id) }[b.dataset.act] || (() => {}))();
 });
 $("btnAddEmp").addEventListener("click", () => empModal(null));
-$("btnExportEmp").addEventListener("click", exportEmpCSV);
 
 const EMP_FIELDS = [
   ["name","Name *","full"],["desig","Designation"],["loc","Location"],["joining","Joining (dd.mm.yyyy)"],
@@ -180,13 +179,15 @@ async function toggleStatus(id) {
   try { await api("/api/employees/" + id, { method: "PUT", body: { ...e, status: next } }); loadEmployees(); }
   catch (err) { toast(err.error, true); }
 }
-function exportEmpCSV() {
+function empExportRows() {
   const cols = [["name","Name"],["desig","Designation"],["loc","Location"],["status","Status"],["joining","Joining"],
     ["salary","Salary"],["phone","Phone"],["bankName","Bank"],["accName","Acc Holder"],["accNo","Account No"],["ifsc","IFSC"],["upi","UPI"]];
   const rows = [cols.map((c) => c[1])];
-  filteredEmp().forEach((e) => rows.push(cols.map((c) => e[c[0]] == null ? "" : e[c[0]])));
-  downloadCSV("Employees.csv", rows);
+  filteredEmp().forEach((e) => rows.push(cols.map((c) => (e[c[0]] == null ? "" : e[c[0]]))));
+  return rows;
 }
+$("btnExportEmp").addEventListener("click", () => downloadCSV("Employees.csv", empExportRows()));
+$("btnExportEmpXlsx").addEventListener("click", () => downloadXLSX("Employees.xlsx", "Employees", empExportRows()));
 
 /* ================= KYC ================= */
 async function kycModal(empId) {
@@ -302,7 +303,8 @@ function initPayControls() {
   $("basisGroup").addEventListener("click", (e) => { const p = e.target.closest(".pill"); if (!p) return;
     state.basis = p.dataset.b; document.querySelectorAll("#basisGroup .pill").forEach((x) => x.classList.toggle("active", x === p)); renderPayroll(); });
   $("btnPostRec").addEventListener("click", postRecoveries);
-  $("btnExportPay").addEventListener("click", exportPayCSV);
+  $("btnExportPay").addEventListener("click", () => { if (payData) downloadCSV(payFileBase() + ".csv", payExportRows()); });
+  $("btnExportPayXlsx").addEventListener("click", () => { if (payData) downloadXLSX(payFileBase() + ".xlsx", "Payroll", payExportRows()); });
 }
 let payData = null;
 const mk = () => `${$("payYear").value}-${$("payMonth").value}`;
@@ -352,12 +354,12 @@ async function postRecoveries() {
     toast(r.posted ? `Posted for ${r.posted} employee(s)` : "Nothing to post — set installments"); renderPayroll(); }
   catch (e) { toast(e.error, true); }
 }
-function exportPayCSV() {
-  if (!payData) return;
+function payExportRows() {
   const rows = [["Name","Designation","Loc","Salary","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net"]];
-  payData.rows.forEach((r) => rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net]));
-  downloadCSV(`Payroll_${MONTHS[+$("payMonth").value]}_${$("payYear").value}.csv`, rows);
+  if (payData) payData.rows.forEach((r) => rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net]));
+  return rows;
 }
+function payFileBase() { return `Payroll_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`; }
 
 /* ================= ADVANCES ================= */
 async function loadAdvances() {
@@ -395,6 +397,13 @@ $("advBody").addEventListener("click", (e) => {
   else if (b.dataset.edit) advModal(Number(b.dataset.edit));
   else if (b.dataset.del) delAdv(Number(b.dataset.del));
 });
+function advExportRows() {
+  const rows = [["Employee","Location","Date","Amount","Reason","Installment/mo","Recovered","Balance","Status"]];
+  state.advances.forEach((a) => rows.push([empName(a.empId), empLocOf(a.empId), a.date, a.amount, a.reason, a.installment, a.recovered, a.balance, a.open ? "Open" : "Closed"]));
+  return rows;
+}
+$("btnExportAdv").addEventListener("click", () => downloadCSV("Advances.csv", advExportRows()));
+$("btnExportAdvXlsx").addEventListener("click", () => downloadXLSX("Advances.xlsx", "Advances", advExportRows()));
 $("btnAddAdv").addEventListener("click", () => advModal(null));
 function advModal(id) {
   const a = id ? state.advances.find((x) => x.id === id) : {};
@@ -574,6 +583,73 @@ function downloadCSV(name, rows) {
   const u = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
   const a = document.createElement("a"); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
 }
+
+/* XLSX-ENGINE-START — minimal pure-JS .xlsx writer (no libraries, CSP-safe).
+   Builds a real Office Open XML workbook: a ZIP (store method) of XML parts. */
+function xlsxBlob(sheetName, rows) {
+  const enc = new TextEncoder();
+  const xe = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const col = (n) => { let s = ""; n++; while (n > 0) { s = String.fromCharCode(65 + (n - 1) % 26) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const safeSheet = xe(String(sheetName || "Sheet1").slice(0, 31).replace(/[\\/?*[\]:]/g, " ")) || "Sheet1";
+
+  let sd = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+  rows.forEach((row, r) => {
+    sd += `<row r="${r + 1}">`;
+    row.forEach((cell, c) => {
+      const ref = col(c) + (r + 1);
+      if (typeof cell === "number" && isFinite(cell)) sd += `<c r="${ref}"><v>${cell}</v></c>`;
+      else sd += `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xe(cell == null ? "" : cell)}</t></is></c>`;
+    });
+    sd += "</row>";
+  });
+  sd += "</sheetData></worksheet>";
+
+  const parts = [
+    ["[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+    ["_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${safeSheet}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'],
+    ["xl/worksheets/sheet1.xml", sd],
+  ].map(([name, xml]) => ({ name, data: enc.encode(xml) }));
+
+  return zipStore(parts);
+}
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    let c = (crc ^ bytes[i]) & 0xff;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crc = (crc >>> 8) ^ c;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const u16 = (n) => [n & 0xff, (n >>> 8) & 0xff];
+  const u32 = (n) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+  const chunks = [], central = []; let offset = 0;
+  for (const f of files) {
+    const nm = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const local = [...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0), ...u32(crc), ...u32(sz), ...u32(sz), ...u16(nm.length), ...u16(0)];
+    chunks.push(new Uint8Array(local), nm, f.data);
+    central.push({ crc, sz, nm, offset });
+    offset += local.length + nm.length + sz;
+  }
+  const cdStart = offset;
+  for (const c of central) {
+    const rec = [...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0), ...u32(c.crc), ...u32(c.sz), ...u32(c.sz), ...u16(c.nm.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(c.offset)];
+    chunks.push(new Uint8Array(rec), c.nm);
+    offset += rec.length + c.nm.length;
+  }
+  const end = [...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(central.length), ...u16(central.length), ...u32(offset - cdStart), ...u32(cdStart), ...u16(0)];
+  chunks.push(new Uint8Array(end));
+  return new Blob(chunks, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+function downloadXLSX(name, sheetName, rows) {
+  const u = URL.createObjectURL(xlsxBlob(sheetName, rows));
+  const a = document.createElement("a"); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
+}
+/* XLSX-ENGINE-END */
 
 /* ---------------- boot ---------------- */
 (async function boot() {

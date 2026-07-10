@@ -49,7 +49,8 @@
         <select id="empLoc"><option value="">All Locations</option></select>
         <select id="empDesig"><option value="">All Designations</option></select>
         <select id="empStatus"><option value="">All Status</option><option>Active</option><option>Inactive</option></select>
-        <button class="btn" id="btnExportEmp">⬇ Export CSV</button>
+        <button class="btn" id="btnExportEmp">⬇ CSV</button>
+        <button class="btn" id="btnExportEmpXlsx">⬇ Excel</button>
         <button class="btn primary write-only" id="btnAddEmp">＋ Add Employee</button>
       </div>
       <table><thead><tr>
@@ -69,7 +70,8 @@
           </div></div>
         <div class="grow"></div>
         <button class="btn write-only" id="btnPostRec">✅ Post Recoveries</button>
-        <button class="btn" id="btnExportPay">⬇ Export CSV</button>
+        <button class="btn" id="btnExportPay">⬇ CSV</button>
+        <button class="btn" id="btnExportPayXlsx">⬇ Excel</button>
       </div>
       <div class="basis-note" id="basisNote"></div>
       <div id="recBanner"></div>
@@ -85,6 +87,8 @@
       <div class="toolbar">
         <input class="search" id="advSearch" placeholder="🔍 Search employee, reason…">
         <select id="advStatus"><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select>
+        <button class="btn" id="btnExportAdv">⬇ CSV</button>
+        <button class="btn" id="btnExportAdvXlsx">⬇ Excel</button>
         <button class="btn primary write-only" id="btnAddAdv">＋ Issue Advance</button>
       </div>
       <table><thead><tr>
