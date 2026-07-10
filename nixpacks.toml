@@ -1,0 +1,4 @@
+# Pin Node 24 — node:sqlite (the built-in DB driver) requires >= 22.5 and is
+# stable & unflagged on 24. This avoids a native build step entirely.
+[phases.setup]
+nixPkgs = ["nodejs_24"]

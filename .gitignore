@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# runtime data (DB + KYC files live on a Railway volume, not in git)
+data/
+
+# migration backups contain real employee PII — keep out of the repo
+legacy-data/
+
+# misc
+*.log
+.DS_Store

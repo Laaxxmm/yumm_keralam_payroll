@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yumm HR</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<!-- Login -->
+<div class="auth-screen" id="authScreen">
+  <form class="auth-box" id="authForm" autocomplete="on">
+    <div class="auth-logo">Y</div>
+    <h1>Yumm HR</h1>
+    <div class="auth-sub">Sign in to continue</div>
+    <div class="fld"><label>Username</label><input id="auUser" autocomplete="username"></div>
+    <div class="fld"><label>Password</label><input id="auPass" type="password" autocomplete="current-password"></div>
+    <label class="auth-row"><input type="checkbox" id="auRemember"> Keep me signed in on this device</label>
+    <button class="btn primary block" type="submit">Sign In</button>
+    <div class="auth-err" id="authErr"></div>
+  </form>
+</div>
+
+<!-- App -->
+<div id="appRoot" hidden>
+  <header>
+    <div class="logo">Y</div>
+    <div><h1>Yumm HR</h1><div class="sub">Employee &amp; Payroll Manager</div></div>
+    <div class="grow"></div>
+    <span class="whoami">👤 <b id="whoami"></b> <span class="role-chip" id="roleChip"></span></span>
+    <button class="btn ghost sm" id="btnLock">🔒 Lock</button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <div class="tab active" data-tab="dash">📊 Dashboard</div>
+    <div class="tab" data-tab="emp">👥 Employees</div>
+    <div class="tab" data-tab="pay">💰 Payroll</div>
+    <div class="tab" data-tab="adv">💵 Advances</div>
+    <div class="tab" data-tab="cmp">🏢 Company</div>
+    <div class="tab admin-only" data-tab="usr">🔐 Users</div>
+  </nav>
+
+  <main>
+    <section id="view-dash"><div class="dash-kpis" id="dashKpis"></div><div class="dash-grid" id="dashGrid"></div></section>
+
+    <section id="view-emp" hidden>
+      <div class="toolbar">
+        <input class="search" id="empSearch" placeholder="🔍 Search name, designation, phone…">
+        <select id="empLoc"><option value="">All Locations</option></select>
+        <select id="empDesig"><option value="">All Designations</option></select>
+        <select id="empStatus"><option value="">All Status</option><option>Active</option><option>Inactive</option></select>
+        <button class="btn" id="btnExportEmp">⬇ Export CSV</button>
+        <button class="btn primary write-only" id="btnAddEmp">＋ Add Employee</button>
+      </div>
+      <table><thead><tr>
+        <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Location</th>
+        <th data-sort="joining">Joining</th><th class="num" data-sort="salary">Salary</th>
+        <th>Phone</th><th data-sort="status">Status</th><th></th>
+      </tr></thead><tbody id="empBody"></tbody></table>
+    </section>
+
+    <section id="view-pay" hidden>
+      <div class="payhead">
+        <div class="fld"><label>Month</label><select id="payMonth"></select></div>
+        <div class="fld"><label>Year</label><select id="payYear"></select></div>
+        <div class="fld"><label>Basis</label>
+          <div class="pill-group" id="basisGroup">
+            <span class="pill active" data-b="cal">Calendar</span><span class="pill" data-b="30">30</span><span class="pill" data-b="26">26</span>
+          </div></div>
+        <div class="grow"></div>
+        <button class="btn write-only" id="btnPostRec">✅ Post Recoveries</button>
+        <button class="btn" id="btnExportPay">⬇ Export CSV</button>
+      </div>
+      <div class="basis-note" id="basisNote"></div>
+      <div id="recBanner"></div>
+      <table><thead><tr>
+        <th>Name</th><th>Designation</th><th>Loc</th><th class="num">Salary</th><th class="num">Work Days</th>
+        <th class="num">Earned</th><th class="num">+Bonus</th><th class="num">−Other Ded.</th>
+        <th class="num">−Adv. Recovery</th><th class="num">Net Payable</th>
+      </tr></thead><tbody id="payBody"></tbody><tfoot id="payFoot"></tfoot></table>
+    </section>
+
+    <section id="view-adv" hidden>
+      <div class="cards" id="advCards"></div>
+      <div class="toolbar">
+        <input class="search" id="advSearch" placeholder="🔍 Search employee, reason…">
+        <select id="advStatus"><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select>
+        <button class="btn primary write-only" id="btnAddAdv">＋ Issue Advance</button>
+      </div>
+      <table><thead><tr>
+        <th>Employee</th><th>Date</th><th class="num">Amount</th><th>Reason</th>
+        <th class="num">Installment</th><th class="num">Recovered</th><th class="num">Balance</th><th>Status</th><th></th>
+      </tr></thead><tbody id="advBody"></tbody></table>
+    </section>
+
+    <section id="view-cmp" hidden>
+      <div class="cmp-wrap">
+        <div class="cmp-card">
+          <div class="cmp-head">🏢 Company Profile</div>
+          <div class="cmp-grid" id="cmpGrid"></div>
+          <div class="cmp-foot"><span class="hint" id="cmpSaved"></span><button class="btn primary write-only" id="btnSaveCmp">💾 Save</button></div>
+        </div>
+        <div class="cmp-card">
+          <div class="cmp-head">🔒 Change Password</div>
+          <div class="cmp-grid">
+            <div class="fld full"><label>Current Password</label><input id="cpCur" type="password"></div>
+            <div class="fld"><label>New Password</label><input id="cpNew" type="password"></div>
+            <div class="fld"><label>Confirm</label><input id="cpNew2" type="password"></div>
+          </div>
+          <div class="cmp-foot"><span class="hint">Min 10 chars, letters + numbers</span><button class="btn primary" id="btnChangePw">Update Password</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-usr" hidden>
+      <div class="toolbar"><h3 style="margin:0;flex:1">User accounts</h3><button class="btn primary" id="btnAddUser">＋ Add User</button></div>
+      <table><thead><tr><th>Username</th><th>Role</th><th>Last login</th><th>Status</th><th></th></tr></thead><tbody id="usrBody"></tbody></table>
+      <div class="hint" style="margin-top:12px">Roles: <b>admin</b> full control · <b>hr</b> manage data (no delete, no users) · <b>viewer</b> read-only, no bank numbers.</div>
+
+      <div class="cmp-card" style="margin-top:22px">
+        <div class="cmp-head">📥 Import legacy data</div>
+        <div class="hint" id="dbStats" style="margin-bottom:12px"></div>
+        <p class="hint" style="line-height:1.6">In the OLD single-file app, click <b>⬇ Backup</b> to download its JSON file, then select it here. Employees, company profile and advances import directly into this database (bank numbers get encrypted). KYC files aren't in the backup — re-upload them per employee.</p>
+        <div class="toolbar">
+          <input type="file" id="impFile" accept="application/json,.json" style="flex:1">
+          <label class="hint" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="impReplace" style="width:auto"> Replace existing data first</label>
+          <button class="btn primary" id="btnImport">Import</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
+<div class="toast" id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
