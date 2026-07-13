@@ -427,7 +427,13 @@ const mk = () => `${$("payYear").value}-${$("payMonth").value}`;
 async function renderPayroll() {
   initPayControls();
   try {
-    payData = await api(`/api/payroll/${mk()}?basis=${state.basis}`);
+    // Load employees alongside payroll (fresh, so the export's bank details are
+    // current). Account number is role-gated: absent from the list for viewers.
+    const [pd, emps] = await Promise.all([
+      api(`/api/payroll/${mk()}?basis=${state.basis}`),
+      api("/api/employees"),
+    ]);
+    payData = pd; state.employees = emps.employees;
   } catch (e) { return toast(e.error, true); }
   fillPayFilters();
   renderPayTable();
@@ -500,8 +506,14 @@ async function postRecoveries() {
   catch (e) { toast(e.error, true); }
 }
 function payExportRows() {
-  const rows = [["Name","Designation","Loc","Salary","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net"]];
-  filteredSortedPayRows().forEach((r) => rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net]));
+  const bankOf = (id) => state.employees.find((e) => e.id === id) || {};
+  const rows = [["Name","Designation","Loc","Salary","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
+    "Bank Name","Account Holder","Account Number","IFSC","UPI"]];
+  filteredSortedPayRows().forEach((r) => {
+    const b = bankOf(r.id);
+    rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
+      b.bankName || "", b.accName || "", b.accNo || "", b.ifsc || "", b.upi || ""]);
+  });
   return rows;
 }
 function payFileBase() { return `Payroll_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`; }
