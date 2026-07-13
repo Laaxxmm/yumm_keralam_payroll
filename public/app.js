@@ -219,6 +219,7 @@ function empExportRows() {
 }
 $("btnExportEmp").addEventListener("click", () => downloadCSV("Employees.csv", empExportRows()));
 $("btnExportEmpXlsx").addEventListener("click", () => downloadXLSX("Employees.xlsx", "Employees", empExportRows()));
+$("btnOfferAll").addEventListener("click", downloadAllOfferLetters);
 
 /* ================= KYC ================= */
 async function kycModal(empId) {
@@ -265,14 +266,24 @@ async function reportModal(empId) {
   openModal(`<h3>Reports</h3><div style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
     <button class="btn primary" id="rBio">📄 Download Bio-Data (Word)</button>
     <button class="btn primary" id="rJoin">📝 Download Joining Report (Word)</button>
+    <button class="btn primary" id="rOffer">📃 Download Offer Letter (Word)</button>
     <div class="hint">Files open in MS Word with the company letterhead.</div></div>
     <div class="foot"><button class="btn ghost" data-close>Close</button></div>`); wireClose();
   const e = await (await api("/api/employees/" + empId)).employee;
-  const c = state.company;
+  const c = await ensureCompany();
   $("rBio").addEventListener("click", () => downloadDoc("BioData_" + safe(e.name), bioHtml(e, c)));
   $("rJoin").addEventListener("click", () => downloadDoc("JoiningReport_" + safe(e.name), joinHtml(e, c)));
+  $("rOffer").addEventListener("click", () => downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c)));
 }
 const safe = (n) => String(n).replace(/[^\w]+/g, "_");
+/** The letterhead needs the company profile; it may not be loaded yet if the
+ *  Company tab was never opened, so fetch it on demand and cache it. */
+async function ensureCompany() {
+  if (!state.company || !Object.keys(state.company).length) {
+    try { state.company = (await api("/api/company")).company || {}; } catch { state.company = state.company || {}; }
+  }
+  return state.company;
+}
 function letterhead(c) {
   const logo = c.logo ? `<img src="${c.logo}" width="92" height="92" style="border-radius:10px">` : "";
   const line = [c.addr1, c.addr2].filter(Boolean).join(", ");
@@ -288,11 +299,12 @@ function letterhead(c) {
       <div style="font-size:10pt">${c.gstin ? "GSTIN: " + esc(c.gstin) : ""} ${c.pan ? " | PAN: " + esc(c.pan) : ""}</div>
     </td></tr></table><hr style="border:none;border-top:2.5px solid #2f6b1e;margin:0 0 14px">`;
 }
-function docWrap(inner, c) {
+function docShell(bodyInner) {
   return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8">
     <style>@page{margin:2cm}body{font-family:'Times New Roman',serif;font-size:13pt}table{border-collapse:collapse;width:100%}td{border:1px solid #000;padding:6px 9px}h2{text-align:center;letter-spacing:2px}.lbl{width:40%;font-weight:bold}</style></head>
-    <body>${letterhead(c)}${inner}</body></html>`;
+    <body>${bodyInner}</body></html>`;
 }
+function docWrap(inner, c) { return docShell(`${letterhead(c)}${inner}`); }
 function bioHtml(e, c) {
   const row = (l, v) => `<tr><td class="lbl">${l}</td><td>${esc(v || "")}</td></tr>`;
   return docWrap(`<p>To,</p><p>&nbsp;</p><p>Respected Sir,</p>
@@ -312,6 +324,55 @@ function joinHtml(e, c) {
     <p style="margin-top:20px">I, <b>${esc(e.name)}</b> have joined <b>${esc(org)}</b> as <b>${esc(e.desig || "____________")}</b>
     and have reported for duty at ${esc(place)} at ${esc(e.reportTime || "________")} A.M.</p>
     <p style="margin-top:60px">Signature</p><p style="margin-top:24px">Name : ${esc(e.name)}</p><p>Address: ${esc(e.address || "")}</p>`, c);
+}
+/** Offer-letter body (no letterhead/shell) — reused for single and bulk output. */
+function offerBody(e, c) {
+  const company = c.name || "the Company";
+  const addr = [c.addr1, c.addr2, [c.city, c.state].filter(Boolean).join(", "), c.pincode].filter(Boolean).join(", ");
+  const salary = (Number(e.salary) || 0).toLocaleString("en-IN");
+  const P = (t) => `<p style="text-align:justify;margin:7px 0">${t}</p>`;
+  const S = (n, title, body) => `<p style="margin:12px 0 2px 0"><b>${n}. ${title}</b></p>${P(body)}`;
+  return `<h2>OFFER LETTER</h2>
+    ${P("Date: ___________")}
+    ${P(`To,<br>Mr./Ms. <b>${esc(e.name)}</b>`)}
+    ${P("<b>Subject: Offer of Employment</b>")}
+    ${P(`Dear Mr./Ms. ${esc(e.name)},`)}
+    ${P(`We are pleased to offer you employment with <b>${esc(company)}</b> as <b>${esc(e.desig || "____________")}</b>, subject to the terms and conditions mentioned below.`)}
+    ${S(1, "Date of Joining", `Your date of joining will be <b>${esc(e.joining || "____________")}</b>.`)}
+    ${S(2, "Place of Work", `Your primary place of work will be our restaurant located at: ${esc(addr || "__________________________________________")}`)}
+    ${S(3, "Salary", `Your monthly gross salary will be <b>₹${salary}</b>, payable on or before the ___ day of the following month after applicable statutory deductions.`)}
+    ${S(4, "Working Hours", "Your working hours, weekly off, and shift timings will be as scheduled by the management from time to time. You may be required to work in shifts, on weekends, or public holidays depending on business requirements.")}
+    ${S(5, "Duties", "You shall perform your assigned duties diligently and follow all operational, hygiene, food safety, customer service, and workplace policies of the restaurant.")}
+    ${S(6, "Probation", "You will be on probation for 3 months from the date of joining. Based on your performance, your services may be confirmed or the probation period may be extended.")}
+    ${S(7, "Notice Period", "Either party may terminate the employment by giving one (1) week's written notice or salary in lieu of such notice, unless otherwise required under applicable law.")}
+    ${P("The management reserves the right to terminate employment without notice in cases of misconduct, fraud, theft, violence, breach of confidentiality, or any serious violation of company policies.")}
+    ${S(8, "Leave", "You shall be entitled to leave and holidays as per the applicable laws and the restaurant's leave policy.")}
+    ${S(9, "Confidentiality", "You shall maintain confidentiality regarding the restaurant's recipes, customer information, pricing, business operations, and other confidential information during and after your employment.")}
+    ${S(10, "Company Property", "Any uniform, keys, ID card, equipment, or other property provided by the restaurant shall remain the property of the employer and must be returned upon cessation of employment.")}
+    ${S(11, "General", "Your employment is governed by the policies of the restaurant and applicable laws. Any false information provided during recruitment may result in termination of employment.")}
+    ${P("If you accept the above terms and conditions, kindly sign and return a copy of this letter.")}
+    ${P("We welcome you to our team and wish you success with us.")}
+    ${P(`For <b>${esc(company)}</b>`)}
+    ${P("<br><br>Authorized Signatory")}
+    <h2 style="margin-top:22px">Acceptance</h2>
+    ${P(`I, Mr./Ms. <b>${esc(e.name)}</b>, accept the terms and conditions of employment stated above.`)}
+    ${P("<br>Employee Signature: ___________________")}
+    ${P(`Name: ${esc(e.name)}`)}
+    ${P("Date: ___________________")}`;
+}
+function offerHtml(e, c) { return docWrap(offerBody(e, c), c); }
+/** One Word file with an offer letter per employee, each on its own page. */
+function offerLettersAllHtml(list, c) {
+  return docShell(list.map((e, i) =>
+    `<div${i < list.length - 1 ? ' style="page-break-after:always"' : ""}>${letterhead(c)}${offerBody(e, c)}</div>`
+  ).join(""));
+}
+async function downloadAllOfferLetters() {
+  const list = filteredEmp();
+  if (!list.length) return toast("No employees to generate", true);
+  if (!confirm(`Generate offer letters for ${list.length} employee(s) into one Word file?`)) return;
+  const c = await ensureCompany();
+  downloadDoc("Offer_Letters_All", offerLettersAllHtml(list, c));
 }
 function downloadDoc(name, html) {
   const bnd = "----=_YHR";
