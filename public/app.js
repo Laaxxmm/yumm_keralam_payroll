@@ -100,7 +100,15 @@ async function loadEmployees() {
   try {
     const [{ employees }, { counts }] = await Promise.all([api("/api/employees"), api("/api/kyc/counts/all")]);
     state.employees = employees; state.kycCounts = counts || {};
-    fillEmpFilters(); renderEmp();
+    fillEmpFilters();
+    // A dashboard tile can request a pre-set filter (status / location / designation).
+    if (state.empPending) {
+      const f = state.empPending; state.empPending = null;
+      const set = (id, val) => { const s = $(id); if (val && [...s.options].some((o) => o.value === val)) s.value = val; else s.value = ""; };
+      $("empSearch").value = "";
+      set("empStatus", f.status); set("empLoc", f.loc); set("empDesig", f.desig);
+    }
+    renderEmp();
   } catch (e) { toast(e.error, true); }
 }
 function uniq(key) { return [...new Set(state.employees.map((e) => e[key]).filter(Boolean))].sort(); }
@@ -832,37 +840,44 @@ async function renderDashboard() {
   const locs = uniq("loc");
   $("dashKpis").innerHTML = `
     <div class="card clickable" data-goto="emp"><div class="k">Total Employees</div><div class="v">${all.length}</div></div>
-    <div class="card clickable" data-goto="emp:Active"><div class="k">Active</div><div class="v" style="color:var(--green)">${active.length}</div></div>
-    <div class="card clickable" data-goto="emp:Inactive"><div class="k">Inactive</div><div class="v" style="color:var(--red)">${all.length - active.length}</div></div>
-    <div class="card"><div class="k">Locations</div><div class="v">${locs.length}</div></div>
+    <div class="card clickable" data-goto="emp" data-fstatus="Active"><div class="k">Active</div><div class="v" style="color:var(--green)">${active.length}</div></div>
+    <div class="card clickable" data-goto="emp" data-fstatus="Inactive"><div class="k">Inactive</div><div class="v" style="color:var(--red)">${all.length - active.length}</div></div>
+    <div class="card clickable" data-goto="emp"><div class="k">Locations</div><div class="v">${locs.length}</div></div>
     <div class="card clickable" data-goto="pay"><div class="k">Monthly Wage (Active)</div><div class="v small">${fmt(actWage)}</div></div>
-    <div class="card"><div class="k">Avg Salary</div><div class="v small">${fmt(all.length ? totWage / all.length : 0)}</div></div>`;
+    <div class="card clickable" data-goto="emp"><div class="k">Avg Salary</div><div class="v small">${fmt(all.length ? totWage / all.length : 0)}</div></div>`;
   const byLoc = locs.map((l) => ({ k: l, v: all.filter((e) => e.loc === l).length, w: all.filter((e) => e.loc === l).reduce((s, e) => s + (e.salary || 0), 0) })).sort((a, b) => b.v - a.v);
   const dm = {}; all.forEach((e) => (dm[e.desig || "—"] = (dm[e.desig || "—"] || 0) + 1));
   const byDesig = Object.entries(dm).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v).slice(0, 8);
   const out = state.advances.reduce((s, a) => s + a.balance, 0);
   $("dashGrid").innerHTML = `
-    <div class="panel"><h4>Headcount by Location</h4>${bars(byLoc.map((x) => ({ k: x.k, v: x.v })), "b")}</div>
-    <div class="panel"><h4>Monthly Wage by Location</h4>${bars(byLoc.map((x) => ({ k: x.k, v: x.w })), "", true)}</div>
-    <div class="panel"><h4>Top Designations</h4>${bars(byDesig, "g")}</div>
+    <div class="panel"><h4>Headcount by Location</h4>${bars(byLoc.map((x) => ({ k: x.k, v: x.v })), "b", false, "loc")}</div>
+    <div class="panel"><h4>Monthly Wage by Location</h4>${bars(byLoc.map((x) => ({ k: x.k, v: x.w })), "", true, "loc")}</div>
+    <div class="panel"><h4>Top Designations</h4>${bars(byDesig, "g", false, "desig")}</div>
     <div class="panel"><h4>Summary</h4>
-      <div class="mini"><span class="r">Total monthly wage</span><span>${fmt(totWage)}</span></div>
-      <div class="mini"><span class="r">Active wage bill</span><span>${fmt(actWage)}</span></div>
+      <div class="mini clickable" data-goto="emp"><span class="r">Total monthly wage</span><span>${fmt(totWage)}</span></div>
+      <div class="mini clickable" data-goto="pay"><span class="r">Active wage bill</span><span>${fmt(actWage)}</span></div>
       <div class="mini clickable" data-goto="adv"><span class="r">Advances outstanding</span><span style="color:var(--brand2)">${fmt(out)}</span></div></div>`;
 }
-function bars(items, cls, cur) {
+/** Bar chart. When `flt` ("loc" | "desig") is given, each bar links to the
+ *  Employees tab filtered by that value. */
+function bars(items, cls, cur, flt) {
   const max = Math.max(1, ...items.map((i) => i.v));
-  return items.length ? items.map((i) => `<div class="bar-row"><div class="bar-lbl">${esc(i.k)}</div>
+  return items.length ? items.map((i) => {
+    const link = flt && i.k && i.k !== "—" ? ` clickable" data-goto="emp" data-f${flt}="${esc(i.k)}"` : '"';
+    return `<div class="bar-row${link}><div class="bar-lbl">${esc(i.k)}</div>
     <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.max(3, Math.round(i.v / max * 100))}%"></div></div>
-    <div class="bar-val">${cur ? fmt(i.v) : i.v}</div></div>`).join("") : '<div class="hint">No data.</div>';
+    <div class="bar-val">${cur ? fmt(i.v) : i.v}</div></div>`;
+  }).join("") : '<div class="hint">No data.</div>';
 }
 $("dashKpis").addEventListener("click", onDashGoto);
 $("dashGrid").addEventListener("click", onDashGoto);
 function onDashGoto(e) {
   const c = e.target.closest("[data-goto]"); if (!c) return;
-  const [tab, arg] = c.dataset.goto.split(":");
-  if (tab === "emp") { switchTab("emp"); if (arg) setTimeout(() => { $("empStatus").value = arg; renderEmp(); }, 100); }
-  else switchTab(tab);
+  const tab = c.dataset.goto;
+  if (tab === "emp") {
+    state.empPending = { status: c.dataset.fstatus || "", loc: c.dataset.floc || "", desig: c.dataset.fdesig || "" };
+    switchTab("emp");
+  } else switchTab(tab);
 }
 
 /* ---------------- utils ---------------- */

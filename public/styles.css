@@ -80,7 +80,12 @@ tfoot td{padding:12px;font-weight:800;background:var(--panel2);border-top:2px so
 @media(max-width:900px){.dash-grid,.cmp-wrap{grid-template-columns:1fr!important}}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
 .panel h4{margin:0 0 14px;font-size:14px}
+.clickable{cursor:pointer}
 .bar-row{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.bar-row.clickable{border-radius:6px;padding:2px 5px;margin:0 -5px 7px}
+.bar-row.clickable:hover{background:#1b1f28}
+.bar-row.clickable:hover .bar-lbl{color:var(--text)}
+.mini.clickable:hover .r{color:var(--text)}
 .bar-lbl{width:120px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar-track{flex:1;height:15px;background:var(--panel2);border-radius:6px;overflow:hidden}
 .bar-fill{height:100%;background:linear-gradient(90deg,var(--brand),var(--brand2))}
