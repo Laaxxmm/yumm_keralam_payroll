@@ -90,10 +90,13 @@ const canWrite = () => state.user && (state.user.role === "admin" || state.user.
 const isAdmin = () => state.user && state.user.role === "admin";
 
 /* ---------------- Modal ---------------- */
-function openModal(html) { $("modalCard").innerHTML = html; $("modal").classList.add("show"); }
-function closeModal() { $("modal").classList.remove("show"); $("modalCard").innerHTML = ""; }
-$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+// `protect:true` guards data-entry forms: clicking the backdrop or pressing
+// Escape won't discard what you typed — you must use Cancel or Save.
+let modalProtected = false;
+function openModal(html, opts = {}) { $("modalCard").innerHTML = html; $("modal").classList.add("show"); modalProtected = !!opts.protect; }
+function closeModal() { $("modal").classList.remove("show"); $("modalCard").innerHTML = ""; modalProtected = false; }
+$("modal").addEventListener("click", (e) => { if (e.target.id === "modal" && !modalProtected) closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modalProtected) closeModal(); });
 
 /* ================= EMPLOYEES ================= */
 async function loadEmployees() {
@@ -178,7 +181,7 @@ const EMP_FIELDS = [
   ["langRead","Read"],["langWrite","Write"],["langSpeak","Speak"],["reportTime","Report Time (A.M.)"],
   ["hobbies","Hobbies","full"],["documents","List of Documents","full"],
   ["__s2","Bank / Payment details","sechead"],
-  ["bankName","Bank Name"],["accName","Account Holder"],["accNo","Account Number","","number"],
+  ["bankName","Bank Name"],["accName","Account Holder"],["accNo","Account Number","","digits"],
   ["ifsc","IFSC Code"],["branch","Branch"],["upi","UPI ID"],
 ];
 function empModal(id) {
@@ -188,16 +191,19 @@ function empModal(id) {
     if (cls === "sechead") return `<div class="sechead">${label}</div>`;
     if (type === "status") return `<div class="fld"><label>Status</label><select id="f_status"><option ${e.status !== "Inactive" ? "selected" : ""}>Active</option><option ${e.status === "Inactive" ? "selected" : ""}>Inactive</option></select></div>`;
     const v = e[k] != null ? esc(e[k]) : "";
-    return `<div class="fld ${cls === "full" ? "full" : ""}"><label>${esc(label)}</label><input id="f_${k}" ${type === "number" ? 'type="number" min="0"' : ""} value="${v}"></div>`;
+    // accNo is "digits": a text input (not number) so long account numbers keep
+    // every digit and are sent as a string — the server validates a digit string.
+    const attr = type === "number" ? 'type="number" min="0"' : type === "digits" ? 'inputmode="numeric" autocomplete="off"' : "";
+    return `<div class="fld ${cls === "full" ? "full" : ""}"><label>${esc(label)}</label><input id="f_${k}" ${attr} value="${v}"></div>`;
   }).join("");
   openModal(`<h3>${id ? "Edit" : "Add"} Employee</h3><div class="body">${fields}</div>
-    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Save</button></div>`);
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Save</button></div>`, { protect: true });
   wireClose();
   $("mSave").addEventListener("click", async () => {
     const payload = {}; EMP_FIELDS.forEach(([k, , cls, type]) => {
       if (cls === "sechead") return;
       if (type === "status") { payload.status = $("f_status").value; return; }
-      payload[k] = type === "number" ? Number($("f_" + k).value || 0) : $("f_" + k).value;
+      payload[k] = type === "number" ? Number($("f_" + k).value || 0) : $("f_" + k).value.trim();
     });
     if (!payload.name.trim()) return toast("Name is required", true);
     try {
@@ -569,7 +575,7 @@ function advModal(id) {
     <div class="fld"><label>Amount (₹) *</label><input id="a_amount" type="number" min="0" value="${a.amount || ""}"></div>
     <div class="fld full"><label>Reason</label><input id="a_reason" value="${esc(a.reason || "")}"></div>
     <div class="fld"><label>Monthly Installment (₹)</label><input id="a_inst" type="number" min="0" value="${a.installment || ""}"></div></div>
-    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Save</button></div>`); wireClose();
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Save</button></div>`, { protect: true }); wireClose();
   $("mSave").addEventListener("click", async () => {
     const body = { empId: Number($("a_emp").value), date: $("a_date").value, amount: Number($("a_amount").value || 0), reason: $("a_reason").value, installment: Number($("a_inst").value || 0) };
     if (body.amount <= 0) return toast("Enter an amount", true);
@@ -785,7 +791,7 @@ function bankImportPreview(data) {
       <div class="hint" style="margin-bottom:10px">✅ exact match · 🟡 best guess · ⚠️ ambiguous · ❓ no match. <b>${needs}</b> row(s) worth checking. Pick the correct employee (or <b>— skip —</b>). Applying <b>overwrites</b> that employee's bank details; "now:" shows their current account.</div>
       <table><thead><tr><th>Sheet name</th><th>Account / Bank</th><th>Holder</th><th>Update employee</th></tr></thead><tbody id="bankPrevBody">${body}</tbody></table>
     </div>
-    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="btnBankApply">Apply</button></div>`);
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="btnBankApply">Apply</button></div>`, { protect: true });
   wireClose();
   $("bankPrevBody").addEventListener("change", (e) => {
     const s = e.target.closest(".bank-emp"); if (!s) return;
@@ -817,7 +823,7 @@ $("btnAddUser").addEventListener("click", () => {
     <div class="fld full"><label>Username</label><input id="u_name"></div>
     <div class="fld"><label>Role</label><select id="u_role"><option>hr</option><option>viewer</option><option>admin</option></select></div>
     <div class="fld"><label>Temporary Password</label><input id="u_pw" type="text" placeholder="Min 10, letters+numbers"></div></div>
-    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Create</button></div>`); wireClose();
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Create</button></div>`, { protect: true }); wireClose();
   $("mSave").addEventListener("click", async () => {
     try { await api("/api/users", { method: "POST", body: { username: $("u_name").value.trim(), role: $("u_role").value, password: $("u_pw").value } });
       closeModal(); toast("User created — they must change the password at first login"); loadUsers(); } catch (e) { toast(e.error, true); }
@@ -825,7 +831,7 @@ $("btnAddUser").addEventListener("click", () => {
 });
 function resetPwModal(id) {
   openModal(`<h3>Reset Password</h3><div class="body"><div class="fld full"><label>New Temporary Password</label><input id="rp_pw" type="text" placeholder="Min 10, letters+numbers"></div></div>
-    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Reset</button></div>`); wireClose();
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="mSave">Reset</button></div>`, { protect: true }); wireClose();
   $("mSave").addEventListener("click", async () => {
     try { await api(`/api/users/${id}/reset-password`, { method: "POST", body: { password: $("rp_pw").value } }); closeModal(); toast("Password reset"); } catch (e) { toast(e.error, true); }
   });
