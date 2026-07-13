@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20260713">
+<link rel="stylesheet" href="/styles.css?v=20260713d">
 </head>
 <body>
 <!-- Login -->
@@ -75,10 +75,17 @@
       </div>
       <div class="basis-note" id="basisNote"></div>
       <div id="recBanner"></div>
+      <div class="toolbar">
+        <input class="search" id="paySearch" type="search" name="pay-search" autocomplete="off" placeholder="🔍 Search name, designation…">
+        <select id="payLoc"><option value="">All Locations</option></select>
+        <select id="payDesig"><option value="">All Designations</option></select>
+      </div>
       <table><thead><tr>
-        <th>Name</th><th>Designation</th><th>Loc</th><th class="num">Salary</th><th class="num">Work Days</th>
-        <th class="num">Earned</th><th class="num">+Bonus</th><th class="num">−Other Ded.</th>
-        <th class="num">−Adv. Recovery</th><th class="num">Net Payable</th>
+        <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Loc</th>
+        <th class="num" data-sort="salary">Salary</th><th class="num" data-sort="wd">Work Days</th>
+        <th class="num" data-sort="earned">Earned</th><th class="num" data-sort="bonus">+Bonus</th>
+        <th class="num" data-sort="ded">−Other Ded.</th><th class="num" data-sort="rec">−Adv. Recovery</th>
+        <th class="num" data-sort="net">Net Payable</th>
       </tr></thead><tbody id="payBody"></tbody><tfoot id="payFoot"></tfoot></table>
     </section>
 
@@ -86,14 +93,15 @@
       <div class="cards" id="advCards"></div>
       <div class="toolbar">
         <input class="search" id="advSearch" type="search" name="adv-search" autocomplete="off" placeholder="🔍 Search employee, reason…">
-        <select id="advStatus"><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select>
+        <select id="advLoc"><option value="">All Locations</option></select>
+        <select id="advStatus"><option value="">All Status</option><option value="open">Open</option><option value="closed">Closed</option></select>
         <button class="btn" id="btnExportAdv">⬇ CSV</button>
         <button class="btn" id="btnExportAdvXlsx">⬇ Excel</button>
         <button class="btn primary write-only" id="btnAddAdv">＋ Issue Advance</button>
       </div>
       <table><thead><tr>
-        <th>Employee</th><th>Date</th><th class="num">Amount</th><th>Reason</th>
-        <th class="num">Installment</th><th class="num">Recovered</th><th class="num">Balance</th><th>Status</th><th></th>
+        <th data-sort="emp">Employee</th><th data-sort="date">Date</th><th class="num" data-sort="amount">Amount</th><th data-sort="reason">Reason</th>
+        <th class="num" data-sort="installment">Installment</th><th class="num" data-sort="recovered">Recovered</th><th class="num" data-sort="balance">Balance</th><th data-sort="status">Status</th><th></th>
       </tr></thead><tbody id="advBody"></tbody></table>
     </section>
 
@@ -117,8 +125,16 @@
     </section>
 
     <section id="view-usr" hidden>
-      <div class="toolbar"><h3 style="margin:0;flex:1">User accounts</h3><button class="btn primary" id="btnAddUser">＋ Add User</button></div>
-      <table><thead><tr><th>Username</th><th>Role</th><th>Last login</th><th>Status</th><th></th></tr></thead><tbody id="usrBody"></tbody></table>
+      <div class="toolbar">
+        <h3 style="margin:0">User accounts</h3>
+        <input class="search" id="usrSearch" type="search" name="usr-search" autocomplete="off" placeholder="🔍 Search username…">
+        <select id="usrRole"><option value="">All Roles</option><option>admin</option><option>hr</option><option>viewer</option></select>
+        <select id="usrStatus"><option value="">All Status</option><option value="ok">OK</option><option value="locked">Locked</option></select>
+        <button class="btn primary" id="btnAddUser">＋ Add User</button>
+      </div>
+      <table><thead><tr>
+        <th data-sort="username">Username</th><th data-sort="role">Role</th><th data-sort="last_login">Last login</th><th data-sort="status">Status</th><th></th>
+      </tr></thead><tbody id="usrBody"></tbody></table>
       <div class="hint" style="margin-top:12px">Roles: <b>admin</b> full control · <b>hr</b> manage data (no delete, no users) · <b>viewer</b> read-only, no bank numbers.</div>
 
       <div class="cmp-card" style="margin-top:22px">
@@ -137,6 +153,6 @@
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20260713"></script>
+<script src="/app.js?v=20260713d"></script>
 </body>
 </html>

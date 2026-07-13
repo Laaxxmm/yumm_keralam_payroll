@@ -25,8 +25,39 @@ async function api(path, opts = {}) {
   return data;
 }
 
-const state = { user: null, employees: [], advances: [], company: {}, kycCounts: {},
-  empSort: { k: "name", d: 1 }, empExtra: null, basis: "cal" };
+const state = { user: null, employees: [], advances: [], company: {}, kycCounts: {}, users: [],
+  empSort: { k: "name", d: 1 }, empExtra: null, basis: "cal",
+  paySort: { k: null, d: 0 }, advSort: { k: null, d: 0 }, usrSort: { k: null, d: 0 } };
+
+/* ---------------- generic table search / sort helpers ---------------- */
+/** Sort a copy of `list` by sort.k (asc/desc via sort.d). `valOf(row,key)` reads
+ *  the value; keys in `numericKeys` compare as numbers, the rest as text. */
+function applySort(list, sort, valOf, numericKeys = []) {
+  if (!sort.k) return list;
+  const num = numericKeys.includes(sort.k);
+  return [...list].sort((a, b) => {
+    const va = valOf(a, sort.k), vb = valOf(b, sort.k);
+    if (num) return ((Number(va) || 0) - (Number(vb) || 0)) * sort.d;
+    return String(va ?? "").localeCompare(String(vb ?? ""), undefined, { numeric: true }) * sort.d;
+  });
+}
+/** Highlight the active sort column header. */
+function markSorted(viewSel, sort) {
+  document.querySelectorAll(viewSel + " thead th").forEach((th) =>
+    th.classList.toggle("sorted", !!sort.k && th.dataset.sort === sort.k));
+}
+/** Make a table's headers clickable: same column toggles direction, new column
+ *  starts ascending. Calls `rerender()` (no refetch) after updating the state. */
+function wireSortHeader(viewSel, sort, rerender) {
+  const thead = document.querySelector(viewSel + " thead");
+  if (!thead) return;
+  thead.addEventListener("click", (e) => {
+    const th = e.target.closest("th[data-sort]"); if (!th) return;
+    const k = th.dataset.sort;
+    if (sort.k === k) sort.d *= -1; else { sort.k = k; sort.d = 1; }
+    rerender();
+  });
+}
 
 /* ---------------- Auth ---------------- */
 function showLogin() { $("appRoot").hidden = true; $("authScreen").style.display = "flex"; setTimeout(() => $("auUser").focus(), 50); }
@@ -305,6 +336,8 @@ function initPayControls() {
   $("btnPostRec").addEventListener("click", postRecoveries);
   $("btnExportPay").addEventListener("click", () => { if (payData) downloadCSV(payFileBase() + ".csv", payExportRows()); });
   $("btnExportPayXlsx").addEventListener("click", () => { if (payData) downloadXLSX(payFileBase() + ".xlsx", "Payroll", payExportRows()); });
+  ["paySearch", "payLoc", "payDesig"].forEach((id) => $(id).addEventListener("input", renderPayTable));
+  wireSortHeader("#view-pay", state.paySort, renderPayTable);
 }
 let payData = null;
 const mk = () => `${$("payYear").value}-${$("payMonth").value}`;
@@ -313,12 +346,40 @@ async function renderPayroll() {
   try {
     payData = await api(`/api/payroll/${mk()}?basis=${state.basis}`);
   } catch (e) { return toast(e.error, true); }
+  fillPayFilters();
+  renderPayTable();
+}
+function fillPayFilters() {
+  if (!payData) return;
+  const setOpts = (id, arr, all) => { const s = $(id), cur = s.value;
+    s.innerHTML = `<option value="">${all}</option>` + arr.map((v) => `<option>${esc(v)}</option>`).join("");
+    if ([...s.options].some((o) => o.value === cur)) s.value = cur; };
+  setOpts("payLoc", [...new Set(payData.rows.map((r) => r.loc).filter(Boolean))].sort(), "All Locations");
+  setOpts("payDesig", [...new Set(payData.rows.map((r) => r.desig).filter(Boolean))].sort(), "All Designations");
+}
+/** Rows for display: apply the search box + location/designation filters + sort. */
+function filteredSortedPayRows() {
+  if (!payData) return [];
+  const q = $("paySearch").value.trim().toLowerCase(), loc = $("payLoc").value, des = $("payDesig").value;
+  const list = payData.rows.filter((r) => {
+    if (loc && r.loc !== loc) return false;
+    if (des && r.desig !== des) return false;
+    if (q && !(`${r.name} ${r.desig} ${r.loc}`.toLowerCase().includes(q))) return false;
+    return true;
+  });
+  return applySort(list, state.paySort, (r, k) => r[k], ["salary", "wd", "earned", "bonus", "ded", "rec", "net"]);
+}
+/** Render the payroll table body/footer from the current filter+sort state
+ *  (no refetch — reuses the last payData). Totals reflect the shown rows. */
+function renderPayTable() {
+  if (!payData) return;
   const w = canWrite();
   $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × Working Days. Only Active employees shown.`;
   $("recBanner").innerHTML = payData.pending && w
     ? `<div style="background:rgba(255,176,61,.1);border:1px solid #4a3a20;color:var(--brand2);padding:9px 13px;border-radius:8px;margin-bottom:12px">⚠ ${payData.pending} recovery(ies) not yet posted. <button class="btn sm" id="bannerPost">Post Recoveries</button></div>` : "";
   if ($("bannerPost")) $("bannerPost").addEventListener("click", postRecoveries);
-  $("payBody").innerHTML = payData.rows.map((r) => {
+  const rows = filteredSortedPayRows();
+  $("payBody").innerHTML = rows.map((r) => {
     const recCell = r.advPosted
       ? `<span style="color:var(--green)">${fmt(r.rec)} ✓</span>${w ? ` <button class="icon-btn rec-btn" data-unpost="${r.id}" data-mode="edit" title="Edit">✎</button><button class="icon-btn del rec-btn" data-unpost="${r.id}" data-mode="delete" title="Delete">🗑</button>` : ""}`
       : w ? `<input class="adj-input" type="number" min="0" value="${r.advOverride != null ? r.advOverride : ""}" placeholder="${r.rec}" data-adj="adv" data-id="${r.id}">` : fmt(r.rec);
@@ -330,10 +391,11 @@ async function renderPayroll() {
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
       <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td></tr>`;
-  }).join("") || `<tr><td colspan="10" class="empty">No active employees.</td></tr>`;
-  const t = payData.totals;
-  $("payFoot").innerHTML = payData.rows.length ? `<tr><td colspan="5">TOTAL — ${payData.rows.length} employees</td>
+  }).join("") || `<tr><td colspan="10" class="empty">No employees match.</td></tr>`;
+  const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
+  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="5">TOTAL — ${rows.length} employees</td>
     <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td></tr>` : "";
+  markSorted("#view-pay", state.paySort);
 }
 $("payBody").addEventListener("change", async (e) => {
   const inp = e.target.closest("[data-adj]"); if (!inp) return;
@@ -356,25 +418,40 @@ async function postRecoveries() {
 }
 function payExportRows() {
   const rows = [["Name","Designation","Loc","Salary","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net"]];
-  if (payData) payData.rows.forEach((r) => rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net]));
+  filteredSortedPayRows().forEach((r) => rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net]));
   return rows;
 }
 function payFileBase() { return `Payroll_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`; }
 
 /* ================= ADVANCES ================= */
 async function loadAdvances() {
-  try { state.advances = (await api("/api/advances")).advances; if (!state.employees.length) state.employees = (await api("/api/employees")).employees; renderAdv(); }
+  try { state.advances = (await api("/api/advances")).advances; if (!state.employees.length) state.employees = (await api("/api/employees")).employees; fillAdvFilters(); renderAdv(); }
   catch (e) { toast(e.error, true); }
 }
-["advSearch","advStatus"].forEach((id) => $(id).addEventListener("input", renderAdv));
+["advSearch","advStatus","advLoc"].forEach((id) => $(id).addEventListener("input", renderAdv));
+wireSortHeader("#view-adv", state.advSort, renderAdv);
 function empName(id) { const e = state.employees.find((x) => x.id === id); return e ? e.name : "(deleted)"; }
 function empLocOf(id) { const e = state.employees.find((x) => x.id === id); return e ? e.loc : ""; }
+function fillAdvFilters() {
+  const s = $("advLoc"), cur = s.value;
+  const locs = [...new Set(state.employees.map((e) => e.loc).filter(Boolean))].sort();
+  s.innerHTML = `<option value="">All Locations</option>` + locs.map((v) => `<option>${esc(v)}</option>`).join("");
+  if ([...s.options].some((o) => o.value === cur)) s.value = cur;
+}
+/** Read a sortable value off an advance row for the given column key. */
+function advSortVal(a, k) {
+  if (k === "emp") return empName(a.empId);
+  if (k === "status") return a.open ? "Open" : "Closed";
+  return a[k];
+}
 function renderAdv() {
-  const q = $("advSearch").value.trim().toLowerCase(), st = $("advStatus").value, w = canWrite();
-  const list = state.advances.filter((a) => {
+  const q = $("advSearch").value.trim().toLowerCase(), st = $("advStatus").value, loc = $("advLoc").value, w = canWrite();
+  let list = state.advances.filter((a) => {
     if (st === "open" && !a.open) return false; if (st === "closed" && a.open) return false;
+    if (loc && empLocOf(a.empId) !== loc) return false;
     if (q && !(`${empName(a.empId)} ${a.reason}`.toLowerCase().includes(q))) return false; return true;
   });
+  list = applySort(list, state.advSort, advSortVal, ["amount", "installment", "recovered", "balance"]);
   $("advBody").innerHTML = list.length ? list.map((a) => `<tr>
     <td><strong>${esc(empName(a.empId))}</strong> <span class="chip loc">${esc(empLocOf(a.empId) || "—")}</span></td>
     <td>${esc(a.date || "—")}</td><td class="num">${fmt(a.amount)}</td><td>${esc(a.reason || "—")}</td>
@@ -390,6 +467,7 @@ function renderAdv() {
     <div class="card"><div class="k">Open Advances</div><div class="v">${state.advances.filter((a) => a.open).length}</div></div>
     <div class="card"><div class="k">Total Issued</div><div class="v small">${fmt(state.advances.reduce((s, a) => s + a.amount, 0))}</div></div>
     <div class="card"><div class="k">Recovered</div><div class="v small" style="color:var(--green)">${fmt(state.advances.reduce((s, a) => s + a.recovered, 0))}</div></div>`;
+  markSorted("#view-adv", state.advSort);
 }
 $("advBody").addEventListener("click", (e) => {
   const b = e.target.closest("[data-ledger],[data-edit],[data-del]"); if (!b) return;
@@ -481,23 +559,46 @@ $("btnChangePw").addEventListener("click", async () => {
 /* ================= USERS ================= */
 async function loadUsers() {
   if (!isAdmin()) return;
-  let users; try { users = (await api("/api/users")).users; } catch (e) { return toast(e.error, true); }
-  $("usrBody").innerHTML = users.map((u) => `<tr>
+  try { state.users = (await api("/api/users")).users; } catch (e) { return toast(e.error, true); }
+  renderUsers();
+  try { const s = await api("/api/admin/stats"); $("dbStats").innerHTML = `Currently in database: <b>${s.employees}</b> employees · <b>${s.advances}</b> advances · <b>${s.kyc}</b> KYC files · <b>${s.users}</b> users.`; } catch {}
+}
+function usrSortVal(u, k) {
+  if (k === "status") return u.locked ? "Locked" : "OK";
+  if (k === "last_login") return u.last_login || "";
+  return u[k];
+}
+function renderUsers() {
+  const q = $("usrSearch").value.trim().toLowerCase(), role = $("usrRole").value, stt = $("usrStatus").value;
+  let list = state.users.filter((u) => {
+    if (role && u.role !== role) return false;
+    if (stt === "locked" && !u.locked) return false;
+    if (stt === "ok" && u.locked) return false;
+    if (q && !String(u.username).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  list = applySort(list, state.usrSort, usrSortVal, []);
+  $("usrBody").innerHTML = list.length ? list.map((u) => `<tr>
     <td><strong>${esc(u.username)}</strong>${u.must_change ? ' <span class="chip">must change pw</span>' : ""}</td>
     <td><select data-role="${u.id}" ${u.id === state.user.id ? "disabled" : ""}>${["admin","hr","viewer"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
     <td>${esc((u.last_login || "—"))}</td><td>${u.locked ? '<span class="badge inactive">Locked</span>' : '<span class="badge active">OK</span>'}</td>
     <td><div class="rowbtns"><button class="icon-btn" data-reset="${u.id}" title="Reset password">🔑</button>
-      ${u.id !== state.user.id ? `<button class="icon-btn del" data-deluser="${u.id}" title="Delete">🗑</button>` : ""}</div></td></tr>`).join("");
+      ${u.id !== state.user.id ? `<button class="icon-btn del" data-deluser="${u.id}" title="Delete">🗑</button>` : ""}</div></td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">No users match.</td></tr>`;
   $("usrBody").querySelectorAll("[data-role]").forEach((s) => s.addEventListener("change", async () => {
-    try { await api(`/api/users/${s.dataset.role}/role`, { method: "PUT", body: { role: s.value } }); toast("Role updated"); } catch (e) { toast(e.error, true); loadUsers(); }
+    try { await api(`/api/users/${s.dataset.role}/role`, { method: "PUT", body: { role: s.value } }); toast("Role updated");
+      const u = state.users.find((x) => x.id === Number(s.dataset.role)); if (u) u.role = s.value; }
+    catch (e) { toast(e.error, true); loadUsers(); }
   }));
   $("usrBody").querySelectorAll("[data-reset]").forEach((b) => b.addEventListener("click", () => resetPwModal(b.dataset.reset)));
   $("usrBody").querySelectorAll("[data-deluser]").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm("Delete this user?")) return;
     try { await api("/api/users/" + b.dataset.deluser, { method: "DELETE" }); toast("Deleted"); loadUsers(); } catch (e) { toast(e.error, true); }
   }));
-  try { const s = await api("/api/admin/stats"); $("dbStats").innerHTML = `Currently in database: <b>${s.employees}</b> employees · <b>${s.advances}</b> advances · <b>${s.kyc}</b> KYC files · <b>${s.users}</b> users.`; } catch {}
+  markSorted("#view-usr", state.usrSort);
 }
+["usrSearch", "usrRole", "usrStatus"].forEach((id) => $(id).addEventListener("input", renderUsers));
+wireSortHeader("#view-usr", state.usrSort, renderUsers);
 $("btnImport").addEventListener("click", async () => {
   const f = $("impFile").files[0];
   if (!f) return toast("Choose your backup JSON file", true);
@@ -655,7 +756,7 @@ function downloadXLSX(name, sheetName, rows) {
    Chromium ignores autocomplete="off" for fields it classifies as a username
    (the login form is still in the DOM), but it will NOT autofill a readonly
    field. Keep them readonly until the user actually focuses to type. */
-["empSearch", "advSearch"].forEach((id) => {
+["empSearch", "advSearch", "paySearch", "usrSearch"].forEach((id) => {
   const inp = $(id);
   if (!inp) return;
   inp.value = "";
