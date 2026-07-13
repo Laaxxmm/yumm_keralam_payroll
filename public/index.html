@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20260713f">
+<link rel="stylesheet" href="/styles.css?v=20260713g">
 </head>
 <body>
 <!-- Login -->
@@ -148,12 +148,21 @@
           <button class="btn primary" id="btnImport">Import</button>
         </div>
       </div>
+
+      <div class="cmp-card" style="margin-top:22px">
+        <div class="cmp-head">🏦 Import bank details (from salary sheet)</div>
+        <p class="hint" style="line-height:1.6">Upload a CSV with columns <b>Location, Name, Account Holder, Account No, IFSC</b> (one row per employee). Each row is matched to an employee — you review and fix the matches before anything is saved. Applying <b>overwrites</b> the matched employee's bank details (Bank Name is filled from the IFSC).</p>
+        <div class="toolbar">
+          <input type="file" id="bankFile" accept=".csv,text/csv" style="flex:1">
+          <button class="btn primary" id="btnBankImport">Review &amp; Import</button>
+        </div>
+      </div>
     </section>
   </main>
 </div>
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20260713f"></script>
+<script src="/app.js?v=20260713g"></script>
 </body>
 </html>

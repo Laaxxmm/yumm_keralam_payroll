@@ -684,6 +684,125 @@ $("btnImport").addEventListener("click", async () => {
     state.employees = []; loadUsers();
   } catch (e) { toast(e.error, true); }
 });
+
+/* ============ BANK DETAILS IMPORT (admin) ============ */
+const BANK_NAMES = {
+  SBIN: "State Bank of India", HDFC: "HDFC Bank", ICIC: "ICICI Bank", KKBK: "Kotak Mahindra Bank",
+  FDRL: "Federal Bank", KARB: "Karnataka Bank", UBIN: "Union Bank of India", CNRB: "Canara Bank",
+  PUNB: "Punjab National Bank", BARB: "Bank of Baroda", YESB: "Yes Bank", UTIB: "Axis Bank",
+  AXIS: "Axis Bank", IDIB: "Indian Bank", IOBA: "Indian Overseas Bank", MAHB: "Bank of Maharashtra",
+  IBKL: "IDBI Bank", NESF: "North East Small Finance Bank", PKGB: "Paschim Banga Gramin Bank",
+};
+function bankFromIfsc(ifsc) {
+  const code = String(ifsc || "").trim().slice(0, 4).toUpperCase();
+  return BANK_NAMES[code] || (code ? code + " Bank" : "");
+}
+/** Minimal CSV parser (handles quoted fields, commas, CRLF, BOM). */
+function parseCSV(text) {
+  const out = []; let field = "", row = [], inq = false;
+  text = String(text).replace(/^﻿/, "");
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inq) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inq = false; }
+      else field += ch;
+    } else if (ch === '"') inq = true;
+    else if (ch === ",") { row.push(field); field = ""; }
+    else if (ch === "\n") { row.push(field); out.push(row); row = []; field = ""; }
+    else if (ch !== "\r") field += ch;
+  }
+  if (field.length || row.length) { row.push(field); out.push(row); }
+  return out.filter((r) => r.some((c) => String(c).trim() !== ""));
+}
+const normName = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
+/** Best-guess employee for a sheet name + location. */
+function matchEmployee(name, loc) {
+  const nn = normName(name), nl = normName(loc);
+  const inLoc = state.employees.filter((e) => normName(e.loc) === nl);
+  const pool = inLoc.length ? inLoc : state.employees;
+  const exact = pool.find((e) => normName(e.name) === nn);
+  if (exact) return { id: exact.id, conf: "exact" };
+  const nt = nn.split(" ").filter(Boolean);
+  const scored = pool.map((e) => {
+    const et = new Set(normName(e.name).split(" ").filter(Boolean));
+    return { e, ov: nt.filter((t) => et.has(t)).length };
+  }).filter((x) => x.ov > 0).sort((a, b) => b.ov - a.ov);
+  if (scored.length === 1 || (scored.length > 1 && scored[0].ov > scored[1].ov))
+    return { id: scored[0].e.id, conf: "guess" };
+  return { id: null, conf: scored.length ? "ambiguous" : "none" };
+}
+$("btnBankImport").addEventListener("click", async () => {
+  const f = $("bankFile").files[0];
+  if (!f) return toast("Choose the bank details CSV file", true);
+  let text; try { text = await f.text(); } catch { return toast("Could not read that file", true); }
+  const rows = parseCSV(text);
+  if (rows.length < 2) return toast("No rows found in the CSV", true);
+  const hdr = rows[0].map((h) => normName(h));
+  const col = (...names) => { for (const n of names) { const i = hdr.indexOf(normName(n)); if (i >= 0) return i; } return -1; };
+  const ci = { loc: col("Location", "Loc"), name: col("Name", "Employee Name"),
+    holder: col("Account Holder", "Beneficiary Name", "Beneficiary", "Acc Holder"),
+    acc: col("Account No", "Bank Account No", "Account Number", "Acc No"), ifsc: col("IFSC") };
+  if (ci.name < 0 || ci.acc < 0) return toast("CSV needs at least Name and Account No columns", true);
+  if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch (e) { return toast(e.error, true); } }
+  const data = rows.slice(1).map((r) => ({
+    loc: ci.loc >= 0 ? (r[ci.loc] || "").trim() : "",
+    name: (r[ci.name] || "").trim(),
+    holder: ci.holder >= 0 ? (r[ci.holder] || "").trim() : "",
+    acc: (ci.acc >= 0 ? (r[ci.acc] || "") : "").replace(/\s/g, ""),
+    ifsc: ci.ifsc >= 0 ? (r[ci.ifsc] || "").trim() : "",
+  })).filter((d) => d.name && d.acc);
+  if (!data.length) return toast("No usable rows (need Name + Account No)", true);
+  data.forEach((d) => { const m = matchEmployee(d.name, d.loc); d.matchId = m.id; d.conf = m.conf; });
+  bankImportPreview(data);
+});
+function bankImportPreview(data) {
+  const emps = [...state.employees].sort((a, b) => a.name.localeCompare(b.name));
+  const opts = (sel) => `<option value="">— skip —</option>` +
+    emps.map((e) => `<option value="${e.id}" ${e.id === sel ? "selected" : ""}>${esc(e.name)} · ${esc(e.loc || "")}</option>`).join("");
+  const flagOf = (c) => ({ exact: "✅", guess: "🟡", ambiguous: "⚠️", none: "❓" }[c] || "");
+  const body = data.map((d, i) => {
+    const cur = d.matchId ? state.employees.find((e) => e.id === d.matchId) : null;
+    const curHas = cur && cur.accNo ? `<span class="hint">now: ****${esc(String(cur.accNo).slice(-4))}</span>` : (cur ? '<span class="hint">now: —</span>' : "");
+    return `<tr>
+      <td>${flagOf(d.conf)} <b>${esc(d.name)}</b><br><span class="hint">${esc(d.loc)}</span></td>
+      <td>${esc(d.acc)}<br><span class="hint">${esc(bankFromIfsc(d.ifsc))} · ${esc(d.ifsc)}</span></td>
+      <td>${esc(d.holder || "—")}</td>
+      <td><select class="bank-emp" data-i="${i}" style="min-width:190px">${opts(d.matchId)}</select><br>${curHas}</td>
+    </tr>`;
+  }).join("");
+  const needs = data.filter((d) => !d.matchId || d.conf !== "exact").length;
+  openModal(`<h3>Review bank details — ${data.length} rows</h3>
+    <div style="padding:12px 20px;max-height:62vh;overflow:auto">
+      <div class="hint" style="margin-bottom:10px">✅ exact match · 🟡 best guess · ⚠️ ambiguous · ❓ no match. <b>${needs}</b> row(s) worth checking. Pick the correct employee (or <b>— skip —</b>). Applying <b>overwrites</b> that employee's bank details; "now:" shows their current account.</div>
+      <table><thead><tr><th>Sheet name</th><th>Account / Bank</th><th>Holder</th><th>Update employee</th></tr></thead><tbody id="bankPrevBody">${body}</tbody></table>
+    </div>
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="btnBankApply">Apply</button></div>`);
+  wireClose();
+  $("bankPrevBody").addEventListener("change", (e) => {
+    const s = e.target.closest(".bank-emp"); if (!s) return;
+    data[Number(s.dataset.i)].matchId = s.value ? Number(s.value) : null;
+  });
+  $("btnBankApply").addEventListener("click", () => applyBankImport(data));
+}
+async function applyBankImport(data) {
+  const toApply = data.filter((d) => d.matchId);
+  if (!toApply.length) return toast("Nothing selected to apply", true);
+  const dupes = toApply.length - new Set(toApply.map((d) => d.matchId)).size;
+  if (!confirm(`Update bank details for ${new Set(toApply.map((d) => d.matchId)).size} employee(s)? This overwrites their existing bank details.` + (dupes ? `\n(${dupes} row(s) point at an already-chosen employee — the last one wins.)` : ""))) return;
+  const btn = $("btnBankApply"); if (btn) { btn.disabled = true; btn.textContent = "Applying…"; }
+  let ok = 0, fail = 0;
+  for (const d of toApply) {
+    const e = state.employees.find((x) => x.id === d.matchId);
+    if (!e) { fail++; continue; }
+    const body = { ...e, bankName: bankFromIfsc(d.ifsc) || e.bankName, accName: d.holder || e.accName, accNo: d.acc, ifsc: d.ifsc };
+    delete body.id;
+    try { await api("/api/employees/" + d.matchId, { method: "PUT", body }); ok++; }
+    catch { fail++; }
+  }
+  closeModal();
+  toast(`Bank details updated for ${ok} employee(s)${fail ? `, ${fail} failed` : ""}`);
+  state.employees = []; loadEmployees();
+}
 $("btnAddUser").addEventListener("click", () => {
   openModal(`<h3>Add User</h3><div class="body">
     <div class="fld full"><label>Username</label><input id="u_name"></div>
