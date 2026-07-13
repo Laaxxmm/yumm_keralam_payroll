@@ -144,6 +144,7 @@ function renderEmp() {
       <td><span class="badge ${inactive ? "inactive" : "active"}" ${w ? `data-act="togglestatus" data-id="${e.id}"` : ""}>${inactive ? "Inactive" : "Active"}</span></td>
       <td><div class="rowbtns">
         <button class="icon-btn" data-act="kyc" data-id="${e.id}" title="KYC documents">📎</button>
+        <button class="icon-btn" data-act="offer" data-id="${e.id}" title="Offer Letter (Word)">📃</button>
         <button class="icon-btn" data-act="report" data-id="${e.id}" title="Reports">📄</button>
         ${w ? `<button class="icon-btn" data-act="edit" data-id="${e.id}" title="Edit">✎</button>` : ""}
         ${del ? `<button class="icon-btn del" data-act="del" data-id="${e.id}" title="Delete">🗑</button>` : ""}
@@ -156,7 +157,7 @@ $("empBody").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]"); if (!b) return;
   const id = Number(b.dataset.id);
   ({ edit: () => empModal(id), del: () => delEmp(id), kyc: () => kycModal(id), report: () => reportModal(id),
-     togglestatus: () => toggleStatus(id) }[b.dataset.act] || (() => {}))();
+     offer: () => downloadOfferFor(id), togglestatus: () => toggleStatus(id) }[b.dataset.act] || (() => {}))();
 });
 $("btnAddEmp").addEventListener("click", () => empModal(null));
 
@@ -361,6 +362,13 @@ function offerBody(e, c) {
     ${P("Date: ___________________")}`;
 }
 function offerHtml(e, c) { return docWrap(offerBody(e, c), c); }
+/** One-click offer letter for an employee row (uses already-loaded list data). */
+async function downloadOfferFor(id) {
+  const e = state.employees.find((x) => x.id === id);
+  if (!e) return toast("Employee not found", true);
+  const c = await ensureCompany();
+  downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c));
+}
 /** One Word file with an offer letter per employee, each on its own page. */
 function offerLettersAllHtml(list, c) {
   return docShell(list.map((e, i) =>
