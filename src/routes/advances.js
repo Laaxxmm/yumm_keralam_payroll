@@ -89,6 +89,14 @@ router.delete("/:id", requireRole("admin", "hr"), (req, res) => {
       ).run(m.mk, row.emp_id);
     }
     db.prepare("DELETE FROM advances WHERE id=?").run(id); // cascades payments
+    // If this was the employee's last advance, any leftover recovery override is
+    // meaningless — clear it so a future advance isn't silently blocked by a
+    // stale value (e.g. a 0 left behind by a deleted recovery). wd/bonus/ded are
+    // left untouched.
+    const remaining = db.prepare("SELECT COUNT(*) AS n FROM advances WHERE emp_id=?").get(row.emp_id).n;
+    if (remaining === 0) {
+      db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0 WHERE emp_id=?").run(row.emp_id);
+    }
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
   audit(req, "advance.delete", "advance", id);
