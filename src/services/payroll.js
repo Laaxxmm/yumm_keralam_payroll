@@ -101,12 +101,26 @@ export function postRecoveries(mk, actor) {
     `INSERT INTO payroll_adjust (mk, emp_id, adv, adv_posted) VALUES (?,?,?,1)
      ON CONFLICT(mk, emp_id) DO UPDATE SET adv=excluded.adv, adv_posted=1`
   );
+  const autoPaidStmt = db.prepare(
+    `SELECT COALESCE(SUM(ap.amount),0) AS s FROM advance_payments ap
+       JOIN advances a ON a.id = ap.advance_id
+      WHERE a.emp_id = ? AND ap.kind = 'auto' AND ap.mk = ?`
+  );
+  const clearStale = db.prepare(
+    "UPDATE payroll_adjust SET adv = NULL, adv_posted = 0 WHERE mk = ? AND emp_id = ?"
+  );
   let posted = 0;
   db.exec("BEGIN");
   try {
     for (const emp of activeEmployees()) {
       const adj = getAdjust(mk, emp.id);
-      if (adj && adj.adv_posted) continue;
+      if (adj && adj.adv_posted) {
+        // A month flagged "posted" must have actual auto-payments behind it.
+        // If it has none, the advance it recovered was later deleted and this
+        // flag is stale — clear it so the current open advances can recover.
+        if (autoPaidStmt.get(emp.id, mk).s > 0) continue; // genuinely posted
+        clearStale.run(mk, emp.id);
+      }
       let amt = recoveryFor(emp.id, mk);
       if (amt <= 0) continue;
       let applied = 0;

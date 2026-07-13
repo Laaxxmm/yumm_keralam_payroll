@@ -71,9 +71,26 @@ router.put("/:id", requireRole("admin", "hr"), (req, res) => {
 
 router.delete("/:id", requireRole("admin", "hr"), (req, res) => {
   const id = Number(req.params.id);
-  if (!getDb().prepare("SELECT id FROM advances WHERE id=?").get(id))
-    return res.status(404).json({ error: "Advance not found." });
-  getDb().prepare("DELETE FROM advances WHERE id=?").run(id); // cascades payments
+  const row = getDb().prepare("SELECT id, emp_id FROM advances WHERE id=?").get(id);
+  if (!row) return res.status(404).json({ error: "Advance not found." });
+  const db = getDb();
+  // Any month this advance auto-posted a recovery in must have its "posted" flag
+  // cleared — otherwise, once the advance (and its auto-payments) are gone,
+  // payroll keeps thinking the month is recovered and won't recover new advances.
+  const months = db.prepare(
+    "SELECT DISTINCT mk FROM advance_payments WHERE advance_id=? AND kind='auto' AND mk IS NOT NULL"
+  ).all(id);
+  db.exec("BEGIN");
+  try {
+    for (const m of months) {
+      db.prepare(
+        `INSERT INTO payroll_adjust (mk, emp_id, adv, adv_posted) VALUES (?,?,NULL,0)
+         ON CONFLICT(mk, emp_id) DO UPDATE SET adv=NULL, adv_posted=0`
+      ).run(m.mk, row.emp_id);
+    }
+    db.prepare("DELETE FROM advances WHERE id=?").run(id); // cascades payments
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
   audit(req, "advance.delete", "advance", id);
   res.json({ ok: true });
 });
