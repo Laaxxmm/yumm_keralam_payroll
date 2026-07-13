@@ -162,7 +162,10 @@ export function createApp() {
 
   /* ------------------------------ static ------------------------------ */
   // Served with no PII baked in — the client fetches everything over the API.
-  app.use(express.static("public", { maxAge: "1h", index: "index.html" }));
+  // maxAge:0 + ETag means the browser revalidates every load (cheap 304s), so a
+  // redeploy of index.html/app.js/styles.css reaches users on their next normal
+  // refresh instead of being stuck behind a stale cache for up to an hour.
+  app.use(express.static("public", { maxAge: 0, etag: true, index: "index.html" }));
 
   // Central error handler: never leak stack traces or SQL to the client.
   app.use((err, req, res, _next) => {

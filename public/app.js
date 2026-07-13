@@ -651,6 +651,20 @@ function downloadXLSX(name, sheetName, rows) {
 }
 /* XLSX-ENGINE-END */
 
+/* Defeat browser autofill of the logged-in username into the search boxes.
+   Chromium ignores autocomplete="off" for fields it classifies as a username
+   (the login form is still in the DOM), but it will NOT autofill a readonly
+   field. Keep them readonly until the user actually focuses to type. */
+["empSearch", "advSearch"].forEach((id) => {
+  const inp = $(id);
+  if (!inp) return;
+  inp.value = "";
+  inp.setAttribute("readonly", "readonly");
+  const unlock = () => inp.removeAttribute("readonly");
+  inp.addEventListener("focus", unlock);
+  inp.addEventListener("pointerdown", unlock);
+});
+
 /* ---------------- boot ---------------- */
 (async function boot() {
   try { const me = await api("/api/auth/me"); state.user = me.user; showApp(); }
