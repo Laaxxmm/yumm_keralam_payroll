@@ -45,7 +45,7 @@
 
     <section id="view-emp" hidden>
       <div class="toolbar">
-        <input class="search" id="empSearch" placeholder="🔍 Search name, designation, phone…">
+        <input class="search" id="empSearch" type="search" name="emp-search" autocomplete="off" placeholder="🔍 Search name, designation, phone…">
         <select id="empLoc"><option value="">All Locations</option></select>
         <select id="empDesig"><option value="">All Designations</option></select>
         <select id="empStatus"><option value="">All Status</option><option>Active</option><option>Inactive</option></select>
@@ -85,7 +85,7 @@
     <section id="view-adv" hidden>
       <div class="cards" id="advCards"></div>
       <div class="toolbar">
-        <input class="search" id="advSearch" placeholder="🔍 Search employee, reason…">
+        <input class="search" id="advSearch" type="search" name="adv-search" autocomplete="off" placeholder="🔍 Search employee, reason…">
         <select id="advStatus"><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select>
         <button class="btn" id="btnExportAdv">⬇ CSV</button>
         <button class="btn" id="btnExportAdvXlsx">⬇ Excel</button>
