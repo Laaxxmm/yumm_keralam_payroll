@@ -720,8 +720,9 @@ function matchEmployee(name, loc) {
   const nn = normName(name), nl = normName(loc);
   const inLoc = state.employees.filter((e) => normName(e.loc) === nl);
   const pool = inLoc.length ? inLoc : state.employees;
-  const exact = pool.find((e) => normName(e.name) === nn);
-  if (exact) return { id: exact.id, conf: "exact" };
+  const exacts = pool.filter((e) => normName(e.name) === nn);
+  if (exacts.length === 1) return { id: exacts[0].id, conf: "exact" };
+  if (exacts.length > 1) return { id: null, conf: "ambiguous" }; // duplicate names → must pick
   const nt = nn.split(" ").filter(Boolean);
   const scored = pool.map((e) => {
     const et = new Set(normName(e.name).split(" ").filter(Boolean));
