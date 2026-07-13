@@ -161,7 +161,7 @@ export function createApp() {
   // BUILD is bumped on each deploy so we can confirm a release actually went
   // live (the health check alone can't tell old code from new during Railway's
   // zero-downtime swap).
-  app.get("/api/health", (_req, res) => res.json({ ok: true, build: "2026-07-13-recovery-fix" }));
+  app.get("/api/health", (_req, res) => res.json({ ok: true, build: "2026-07-13-override-clear-fix" }));
 
   /* ------------------------------ static ------------------------------ */
   // Served with no PII baked in — the client fetches everything over the API.

@@ -27,11 +27,16 @@ router.get("/:mk", (req, res) => {
   res.json({ mk, label: monthLabel(mk), baseDays: baseDaysFor(mk, basis), basis, rows, totals, pending });
 });
 
+// `wd` and `adv` are nullable: null means "unset — fall back to the default"
+// (base working days / scheduled recovery). `.nullable()` must wrap the coercion
+// so an explicit null is preserved; a bare `z.union([z.coerce.number(), z.null()])`
+// would let z.coerce.number() turn null into 0, making it impossible to clear
+// an override (it would stay stuck at 0).
 const AdjustSchema = z.object({
-  wd: z.union([z.coerce.number().int().min(0).max(366), z.null()]).optional(),
+  wd: z.coerce.number().int().min(0).max(366).nullable().optional(),
   bonus: z.coerce.number().int().min(0).max(100_000_000).optional(),
   ded: z.coerce.number().int().min(0).max(100_000_000).optional(),
-  adv: z.union([z.coerce.number().int().min(0).max(100_000_000), z.null()]).optional(),
+  adv: z.coerce.number().int().min(0).max(100_000_000).nullable().optional(),
 });
 
 /** PUT /api/payroll/:mk/:empId — set working days / bonus / deduction / recovery override. */

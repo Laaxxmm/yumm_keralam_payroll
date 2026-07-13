@@ -128,3 +128,22 @@ test("legacy import rejects malformed payload", async () => {
   const r = await api("/api/admin/import-legacy", { method: "POST", body: JSON.stringify({ backup: { nope: true } }) });
   assert.equal(r.status, 400);
 });
+
+test("clearing a recovery override (null) reverts to scheduled — null is not coerced to 0", async () => {
+  const mk = "2026-8";
+  const emp = await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "OverrideTest", salary: 20000, status: "Active" }) })).json();
+  const eid = emp.id;
+  await api("/api/advances", { method: "POST", body: JSON.stringify({ empId: eid, amount: 3000, installment: 1000, reason: "T", date: "01.09.2026" }) });
+  const rec = async () => (await (await api(`/api/payroll/${mk}?basis=cal`)).json()).rows.find((x) => x.id === eid);
+
+  assert.equal((await rec()).rec, 1000);        // scheduled recovery from the installment
+
+  await api(`/api/payroll/${mk}/${eid}`, { method: "PUT", body: JSON.stringify({ adv: 0 }) });
+  assert.equal((await rec()).rec, 0);           // overridden to zero
+
+  // Emptying the box sends null. It must clear the override, not get coerced to 0.
+  await api(`/api/payroll/${mk}/${eid}`, { method: "PUT", body: JSON.stringify({ adv: null }) });
+  const r = await rec();
+  assert.equal(r.advOverride, null);            // override actually cleared
+  assert.equal(r.rec, 1000);                    // and recovery is back to scheduled
+});
