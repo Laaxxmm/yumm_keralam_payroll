@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20260713l">
+<link rel="stylesheet" href="/styles.css?v=20260714a">
 </head>
 <body>
 <!-- Login -->
@@ -37,6 +37,7 @@
     <div class="tab" data-tab="pay">💰 Payroll</div>
     <div class="tab" data-tab="adv">💵 Advances</div>
     <div class="tab" data-tab="cmp">🏢 Company</div>
+    <div class="tab admin-only" data-tab="apr">✔ Approvals</div>
     <div class="tab admin-only" data-tab="usr">🔐 Users</div>
   </nav>
 
@@ -125,6 +126,13 @@
       </div>
     </section>
 
+    <section id="view-apr" hidden>
+      <div class="toolbar"><h3 style="margin:0;flex:1">Pending approvals</h3><button class="btn" id="btnAprRefresh">↻ Refresh</button></div>
+      <div id="aprPending"></div>
+      <h3 style="margin:26px 0 10px">Recent decisions</h3>
+      <div id="aprDecided"></div>
+    </section>
+
     <section id="view-usr" hidden>
       <div class="toolbar">
         <h3 style="margin:0">User accounts</h3>
@@ -163,6 +171,6 @@
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20260713l"></script>
+<script src="/app.js?v=20260714a"></script>
 </body>
 </html>

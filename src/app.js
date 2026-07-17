@@ -15,6 +15,7 @@ import advancesRouter from "./routes/advances.js";
 import payrollRouter from "./routes/payroll.js";
 import usersRouter from "./routes/users.js";
 import adminRouter from "./routes/admin.js";
+import approvalsRouter from "./routes/approvals.js";
 import { requireRole as _rr } from "./auth.js";
 import bcrypt from "bcryptjs";
 
@@ -150,6 +151,7 @@ export function createApp() {
   app.use("/api/payroll", requireAuth, payrollRouter);
   app.use("/api/users", requireAuth, _rr("admin"), usersRouter);
   app.use("/api/admin", requireAuth, _rr("admin"), adminRouter);
+  app.use("/api/approvals", requireAuth, _rr("admin"), approvalsRouter);
 
   app.get("/api/audit", requireRole("admin"), (req, res) => {
     const rows = getDb()
@@ -161,7 +163,7 @@ export function createApp() {
   // BUILD is bumped on each deploy so we can confirm a release actually went
   // live (the health check alone can't tell old code from new during Railway's
   // zero-downtime swap).
-  app.get("/api/health", (_req, res) => res.json({ ok: true, build: "2026-07-13-clear-override-on-last-delete" }));
+  app.get("/api/health", (_req, res) => res.json({ ok: true, build: "2026-07-14-history-leaving-maker-checker" }));
 
   /* ------------------------------ static ------------------------------ */
   // Served with no PII baked in — the client fetches everything over the API.

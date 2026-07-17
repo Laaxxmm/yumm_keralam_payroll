@@ -129,6 +129,71 @@ test("legacy import rejects malformed payload", async () => {
   assert.equal(r.status, 400);
 });
 
+test("salary history: each month pays the salary in force that month", async () => {
+  const emp = await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "HistTest", salary: 10000, status: "Active" }) })).json();
+  const row = async (mk) => (await (await api(`/api/payroll/${mk}?basis=30`)).json()).rows.find((x) => x.id === emp.id);
+  assert.equal((await row("2026-6")).salary, 10000);
+
+  const full = (await (await api("/api/employees/" + emp.id)).json()).employee;
+  await api("/api/employees/" + emp.id, { method: "PUT", body: JSON.stringify({ ...full, salary: 20000, effectiveFrom: "01.08.2026" }) });
+
+  assert.equal((await row("2026-6")).salary, 10000); // July still old salary
+  assert.equal((await row("2026-7")).salary, 20000); // August uses the raise
+  const hist = (await (await api(`/api/employees/${emp.id}/history`)).json()).history;
+  assert.equal(hist.length, 1);
+  assert.equal(hist[0].field, "salary");
+  assert.equal(hist[0].new_value, "20000");
+  assert.equal(hist[0].effective, "2026-08-01");
+});
+
+test("joining/leaving dates control which months an employee is on payroll", async () => {
+  const emp = await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "LeaveTest", salary: 9000, status: "Active", joining: "01.06.2026", leaving: "15.07.2026" }) })).json();
+  const inMonth = async (mk) => !!(await (await api(`/api/payroll/${mk}?basis=30`)).json()).rows.find((x) => x.id === emp.id);
+  assert.equal(await inMonth("2026-4"), false); // May — before joining
+  assert.equal(await inMonth("2026-5"), true);  // June
+  assert.equal(await inMonth("2026-6"), true);  // July — leaving month still included
+  assert.equal(await inMonth("2026-7"), false); // August — gone
+});
+
+test("maker-checker: hr's sensitive changes wait for admin approval", async () => {
+  await api("/api/users", { method: "POST", body: JSON.stringify({ username: "hrmaker", password: "Mk8rPass773", role: "hr" }) });
+  const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: H, body: JSON.stringify({ username: "hrmaker", password: "Mk8rPass773" }) });
+  const hrCookie = login.headers.get("set-cookie").split(";")[0];
+  const hrApi = (path, opts = {}) => fetch(`${base}${path}`, { ...opts, headers: { ...H, cookie: hrCookie, ...(opts.headers || {}) } });
+
+  const emp = await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "MakerTest", salary: 12000, status: "Active" }) })).json();
+  const full = (await (await api("/api/employees/" + emp.id)).json()).employee;
+
+  // Non-sensitive edit by hr applies immediately
+  const direct = await hrApi("/api/employees/" + emp.id, { method: "PUT", body: JSON.stringify({ ...full, phone: "9999" }) });
+  assert.equal(direct.status, 200);
+
+  // Salary change by hr is queued, not applied
+  const q = await hrApi("/api/employees/" + emp.id, { method: "PUT", body: JSON.stringify({ ...full, phone: "9999", salary: 15000 }) });
+  assert.equal(q.status, 202);
+  assert.equal((await q.json()).queued, true);
+  assert.equal((await (await api("/api/employees/" + emp.id)).json()).employee.salary, 12000);
+
+  // hr cannot access the approvals API
+  assert.equal((await hrApi("/api/approvals")).status, 403);
+
+  // Admin approves → change applies (and lands in history)
+  const list = await (await api("/api/approvals")).json();
+  const pend = list.pending.find((p) => p.action === "employee.update" && p.entity_id === String(emp.id));
+  assert.ok(pend, "queued employee update visible to admin");
+  assert.equal((await api(`/api/approvals/${pend.id}/approve`, { method: "POST", body: "{}" })).status, 200);
+  assert.equal((await (await api("/api/employees/" + emp.id)).json()).employee.salary, 15000);
+
+  // hr advance is queued; admin rejects → nothing created
+  const qa = await hrApi("/api/advances", { method: "POST", body: JSON.stringify({ empId: emp.id, amount: 3000, installment: 500 }) });
+  assert.equal(qa.status, 202);
+  const pend2 = (await (await api("/api/approvals")).json()).pending.find((p) => p.action === "advance.create");
+  assert.ok(pend2);
+  await api(`/api/approvals/${pend2.id}/reject`, { method: "POST", body: JSON.stringify({ note: "not needed" }) });
+  const advs = (await (await api("/api/advances")).json()).advances;
+  assert.ok(!advs.find((a) => a.empId === emp.id), "rejected advance was not created");
+});
+
 test("clearing a recovery override (null) reverts to scheduled — null is not coerced to 0", async () => {
   const mk = "2026-8";
   const emp = await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "OverrideTest", salary: 20000, status: "Active" }) })).json();

@@ -3,9 +3,10 @@ import { z } from "zod";
 import { getDb, audit } from "../db.js";
 import { requireRole } from "../auth.js";
 import {
-  activeEmployees, computeRow, baseDaysFor, monthLabel,
+  employeesForMonth, computeRow, baseDaysFor, monthLabel,
   postRecoveries, unpostRecovery,
 } from "../services/payroll.js";
+import { queueApproval } from "../services/approvals.js";
 
 const router = Router();
 const MK_RE = /^\d{4}-(?:[0-9]|1[01])$/; // YYYY-monthIndex(0..11)
@@ -15,7 +16,7 @@ router.get("/:mk", (req, res) => {
   const mk = req.params.mk;
   if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
   const basis = ["cal", "30", "26"].includes(req.query.basis) ? req.query.basis : "cal";
-  const rows = activeEmployees().map((e) => computeRow(e, mk, basis));
+  const rows = employeesForMonth(mk).map((e) => computeRow(e, mk, basis));
   const totals = rows.reduce(
     (t, r) => ({
       earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded,
@@ -61,6 +62,14 @@ router.put("/:mk/:empId", requireRole("admin", "hr"), (req, res) => {
 router.post("/:mk/post-recoveries", requireRole("admin", "hr"), (req, res) => {
   const mk = req.params.mk;
   if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
+  // Maker–checker: posting recoveries moves money, so hr requests wait for admin.
+  if (req.user.role === "hr") {
+    const aid = queueApproval(req, "payroll.post", mk,
+      `Post advance recoveries — ${monthLabel(mk)}`,
+      "Applies each employee's scheduled/override recovery to their open advances.",
+      { mk });
+    return res.status(202).json({ queued: true, approvalId: aid });
+  }
   const posted = postRecoveries(mk, req.user);
   audit(req, "payroll.post_recoveries", "payroll", mk, `${posted} employees`);
   res.json({ ok: true, posted });
@@ -70,6 +79,14 @@ router.post("/:mk/unpost/:empId", requireRole("admin", "hr"), (req, res) => {
   const mk = req.params.mk, empId = Number(req.params.empId);
   if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
   const mode = req.body?.mode === "delete" ? "delete" : "edit";
+  if (req.user.role === "hr") {
+    const emp = getDb().prepare("SELECT name FROM employees WHERE id=?").get(empId);
+    const aid = queueApproval(req, "payroll.unpost", mk,
+      `Un-post recovery (${mode}) — ${emp?.name || "employee #" + empId}, ${monthLabel(mk)}`,
+      "Removes the posted recovery; the amount returns to the advance balance.",
+      { mk, empId, mode });
+    return res.status(202).json({ queued: true, approvalId: aid });
+  }
   unpostRecovery(mk, empId, mode);
   audit(req, "payroll.unpost", "payroll", mk, `emp ${empId} ${mode}`);
   res.json({ ok: true });

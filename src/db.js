@@ -158,6 +158,40 @@ function migrate(d) {
     );
     CREATE INDEX IF NOT EXISTS idx_kyc_emp ON kyc_files(emp_id);
 
+    -- Salary (CTC) and designation changes, with the date they take effect.
+    -- Payroll uses this to compute each month with the values current THAT month.
+    CREATE TABLE IF NOT EXISTS emp_history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      emp_id     INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      field      TEXT NOT NULL CHECK (field IN ('salary','desig')),
+      old_value  TEXT,
+      new_value  TEXT NOT NULL,
+      effective  TEXT NOT NULL,          -- ISO yyyy-mm-dd, sortable
+      changed_by TEXT,
+      changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      note       TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_hist_emp ON emp_history(emp_id, field, effective);
+
+    -- Maker–checker queue: sensitive changes by 'hr' wait here until an admin
+    -- approves. The payload is AES-encrypted (may contain bank numbers).
+    CREATE TABLE IF NOT EXISTS approvals (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      action            TEXT NOT NULL,
+      entity_id         TEXT,
+      summary           TEXT NOT NULL DEFAULT '',
+      detail            TEXT NOT NULL DEFAULT '',
+      payload_enc       TEXT NOT NULL,
+      requested_by      INTEGER NOT NULL,
+      requested_by_name TEXT NOT NULL,
+      requested_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+      decided_by        TEXT,
+      decided_at        TEXT,
+      note              TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+
     -- Append-only trail. Every mutation and every KYC read is recorded.
     CREATE TABLE IF NOT EXISTS audit_log (
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +209,13 @@ function migrate(d) {
 
   // Company is a singleton row.
   d.exec("INSERT OR IGNORE INTO company (id) VALUES (1)");
+
+  // Additive column migrations for databases created before the column existed.
+  const hasCol = (table, col) =>
+    d.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('${table}') WHERE name = ?`).get(col).n > 0;
+  if (!hasCol("employees", "leaving")) {
+    d.exec("ALTER TABLE employees ADD COLUMN leaving TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 /** Write an audit entry. Never throws — auditing must not break a request. */

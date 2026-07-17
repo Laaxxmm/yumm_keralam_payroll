@@ -41,6 +41,41 @@ export function baseDaysFor(mk, basis) {
   return daysInMonth(mk); // calendar
 }
 
+/** Parse a dd.mm.yyyy (also dd/mm/yyyy, dd-mm-yyyy) date to ISO yyyy-mm-dd, or null. */
+export function dmyToIso(s) {
+  const m = String(s || "").trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (!m) return null;
+  const d = +m[1], mo = +m[2], y = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+/** First and last day of a payroll month as ISO strings. */
+export function monthRangeIso(mk) {
+  const p = mkParts(mk);
+  const last = new Date(p.y, p.m + 1, 0).getDate();
+  const mm = String(p.m + 1).padStart(2, "0");
+  return { start: `${p.y}-${mm}-01`, end: `${p.y}-${mm}-${String(last).padStart(2, "0")}` };
+}
+
+/**
+ * The value of a history-tracked field (salary/desig) as of the given month's
+ * end. Falls back to the current value when the employee has no recorded
+ * changes; for months before the first recorded change, uses that change's
+ * old value.
+ */
+export function fieldAsOf(empId, field, monthEndIso, currentValue) {
+  const rows = getDb()
+    .prepare("SELECT old_value, new_value, effective FROM emp_history WHERE emp_id=? AND field=? ORDER BY effective, id")
+    .all(empId, field);
+  if (!rows.length) return currentValue;
+  let val = null;
+  for (const r of rows) { if (r.effective <= monthEndIso) val = r.new_value; }
+  if (val !== null) return field === "salary" ? Number(val) : val;
+  const first = rows[0];
+  if (first.old_value == null) return currentValue;
+  return field === "salary" ? Number(first.old_value) : first.old_value;
+}
+
 export function getAdjust(mk, empId) {
   return getDb().prepare("SELECT * FROM payroll_adjust WHERE mk = ? AND emp_id = ?").get(mk, empId) || null;
 }
@@ -72,11 +107,16 @@ export function computeRow(emp, mk, basis) {
   const wd = adj && adj.wd != null ? adj.wd : bd;
   const bonus = adj ? adj.bonus : 0;
   const ded = adj ? adj.ded : 0;
-  const earned = Math.round((emp.salary || 0) * (wd / bd));
+  // Pay the month with the salary/designation that was in force THAT month —
+  // a raise recorded with a later effective date must not rewrite old months.
+  const monthEnd = monthRangeIso(mk).end;
+  const salary = fieldAsOf(emp.id, "salary", monthEnd, emp.salary || 0);
+  const desig = fieldAsOf(emp.id, "desig", monthEnd, emp.desig);
+  const earned = Math.round((salary || 0) * (wd / bd));
   const rec = recoveryFor(emp.id, mk);
   const net = earned + bonus - ded - rec;
   return {
-    id: emp.id, name: emp.name, desig: emp.desig, loc: emp.loc, salary: emp.salary,
+    id: emp.id, name: emp.name, desig, loc: emp.loc, salary,
     wd, bd, earned, bonus, ded, rec, net,
     advPosted: !!(adj && adj.adv_posted), advOverride: adj ? adj.adv : null,
   };
@@ -85,6 +125,24 @@ export function computeRow(emp, mk, basis) {
 /** Only Active employees are paid. */
 export function activeEmployees() {
   return getDb().prepare("SELECT * FROM employees WHERE status='Active' ORDER BY loc, name").all();
+}
+
+/**
+ * Employees on the payroll of a given month:
+ *  - joined on/before the month's end (unparseable/blank joining ⇒ no filter),
+ *  - if a leaving date is set: included up to and including the leaving month
+ *    (regardless of the Active flag, so history stays correct),
+ *  - otherwise: the current Active flag decides, as before.
+ */
+export function employeesForMonth(mk) {
+  const { start, end } = monthRangeIso(mk);
+  return getDb().prepare("SELECT * FROM employees ORDER BY loc, name").all().filter((e) => {
+    const j = dmyToIso(e.joining);
+    if (j && j > end) return false;
+    const l = dmyToIso(e.leaving);
+    if (l) return l >= start;
+    return e.status === "Active";
+  });
 }
 
 /**
@@ -112,7 +170,7 @@ export function postRecoveries(mk, actor) {
   let posted = 0;
   db.exec("BEGIN");
   try {
-    for (const emp of activeEmployees()) {
+    for (const emp of employeesForMonth(mk)) {
       const adj = getAdjust(mk, emp.id);
       if (adj && adj.adv_posted) {
         // A month flagged "posted" must have actual auto-payments behind it.

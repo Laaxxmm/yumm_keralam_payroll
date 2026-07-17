@@ -83,8 +83,8 @@ $("btnLock").addEventListener("click", async () => { try { await api("/api/auth/
 $("tabs").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) switchTab(t.dataset.tab); });
 function switchTab(tab) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
-  ["dash","emp","pay","adv","cmp","usr"].forEach((v) => ($("view-" + v).hidden = v !== tab));
-  ({ dash: renderDashboard, emp: loadEmployees, pay: renderPayroll, adv: loadAdvances, cmp: loadCompany, usr: loadUsers }[tab] || (() => {}))();
+  ["dash","emp","pay","adv","cmp","apr","usr"].forEach((v) => ($("view-" + v).hidden = v !== tab));
+  ({ dash: renderDashboard, emp: loadEmployees, pay: renderPayroll, adv: loadAdvances, cmp: loadCompany, apr: loadApprovals, usr: loadUsers }[tab] || (() => {}))();
 }
 const canWrite = () => state.user && (state.user.role === "admin" || state.user.role === "hr");
 const isAdmin = () => state.user && state.user.role === "admin";
@@ -174,7 +174,9 @@ $("btnAddEmp").addEventListener("click", () => empModal(null));
 
 const EMP_FIELDS = [
   ["name","Name *","full"],["desig","Designation"],["loc","Location"],["joining","Joining (dd.mm.yyyy)"],
+  ["leaving","Leaving (dd.mm.yyyy)"],
   ["salary","Monthly Salary (₹)","","number"],["phone","Phone"],["status","Status","","status"],
+  ["effectiveFrom","Change Effective From (dd.mm.yyyy)"],
   ["__s1","Report details","sechead"],
   ["fatherName","Father's Name"],["dob","Date of Birth"],["address","Full Address","full"],
   ["qualGen","Qualification — General"],["qualTech","Qualification — Technical"],["experience","Experience","full"],
@@ -190,7 +192,9 @@ function empModal(id) {
     const [k, label, cls, type] = f;
     if (cls === "sechead") return `<div class="sechead">${label}</div>`;
     if (type === "status") return `<div class="fld"><label>Status</label><select id="f_status"><option ${e.status !== "Inactive" ? "selected" : ""}>Active</option><option ${e.status === "Inactive" ? "selected" : ""}>Inactive</option></select></div>`;
-    const v = e[k] != null ? esc(e[k]) : "";
+    // effectiveFrom isn't stored on the employee — it dates a salary/designation
+    // change for the history log; default it to today.
+    const v = k === "effectiveFrom" ? todayStr() : e[k] != null ? esc(e[k]) : "";
     // accNo is "digits": a text input (not number) so long account numbers keep
     // every digit and are sent as a string — the server validates a digit string.
     const attr = type === "number" ? 'type="number" min="0"' : type === "digits" ? 'inputmode="numeric" autocomplete="off"' : "";
@@ -207,9 +211,9 @@ function empModal(id) {
     });
     if (!payload.name.trim()) return toast("Name is required", true);
     try {
-      if (id) await api("/api/employees/" + id, { method: "PUT", body: payload });
-      else await api("/api/employees", { method: "POST", body: payload });
-      closeModal(); toast("Saved"); loadEmployees();
+      const r = id ? await api("/api/employees/" + id, { method: "PUT", body: payload })
+                   : await api("/api/employees", { method: "POST", body: payload });
+      closeModal(); toast(r && r.queued ? "✋ Sent for admin approval" : "Saved"); loadEmployees();
     } catch (err) { toast(err.error, true); }
   });
 }
@@ -222,8 +226,11 @@ async function delEmp(id) {
 async function toggleStatus(id) {
   const e = state.employees.find((x) => x.id === id);
   const next = (e.status || "Active") === "Inactive" ? "Active" : "Inactive";
-  try { await api("/api/employees/" + id, { method: "PUT", body: { ...e, status: next } }); loadEmployees(); }
-  catch (err) { toast(err.error, true); }
+  try {
+    const r = await api("/api/employees/" + id, { method: "PUT", body: { ...e, status: next } });
+    if (r && r.queued) toast("✋ Sent for admin approval");
+    loadEmployees();
+  } catch (err) { toast(err.error, true); }
 }
 function empExportRows() {
   const cols = [["name","Name"],["desig","Designation"],["loc","Location"],["status","Status"],["joining","Joining"],
@@ -282,6 +289,7 @@ async function reportModal(empId) {
     <button class="btn primary" id="rBio">📄 Download Bio-Data (Word)</button>
     <button class="btn primary" id="rJoin">📝 Download Joining Report (Word)</button>
     <button class="btn primary" id="rOffer">📃 Download Offer Letter (Word)</button>
+    <button class="btn" id="rHist">📜 CTC / Designation History</button>
     <div class="hint">Files open in MS Word with the company letterhead.</div></div>
     <div class="foot"><button class="btn ghost" data-close>Close</button></div>`); wireClose();
   const e = await (await api("/api/employees/" + empId)).employee;
@@ -289,6 +297,24 @@ async function reportModal(empId) {
   $("rBio").addEventListener("click", () => downloadDoc("BioData_" + safe(e.name), bioHtml(e, c)));
   $("rJoin").addEventListener("click", () => downloadDoc("JoiningReport_" + safe(e.name), joinHtml(e, c)));
   $("rOffer").addEventListener("click", () => downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c)));
+  $("rHist").addEventListener("click", () => historyModal(e));
+}
+/** Timeline of salary (CTC) and designation changes for one employee. */
+async function historyModal(e) {
+  let rows = [];
+  try { rows = (await api(`/api/employees/${e.id}/history`)).history; } catch (err) { return toast(err.error, true); }
+  const isoToDmy = (iso) => { const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}.${m[2]}.${m[1]}` : iso; };
+  const line = (h) => {
+    const what = h.field === "salary" ? `Salary ${fmt(h.old_value)} → <b>${fmt(h.new_value)}</b>`
+      : `Designation "${esc(h.old_value || "—")}" → <b>"${esc(h.new_value)}"</b>`;
+    return `<div class="mini"><span>${what}<br><span class="hint">effective ${esc(isoToDmy(h.effective))} · by ${esc(h.changed_by || "—")} · recorded ${esc((h.changed_at || "").slice(0, 10))}</span></span></div>`;
+  };
+  openModal(`<h3>📜 History — ${esc(e.name)}</h3>
+    <div style="padding:14px 20px;max-height:60vh;overflow:auto">
+      ${rows.length ? rows.map(line).join("") : '<div class="hint">No salary or designation changes recorded yet. Changes made from now on (with their effective date) will appear here.</div>'}
+    </div>
+    <div class="foot"><button class="btn ghost" data-close>Close</button></div>`);
+  wireClose();
 }
 const safe = (n) => String(n).replace(/[^\w]+/g, "_");
 /** The letterhead needs the company profile; it may not be loaded yet if the
@@ -463,7 +489,7 @@ function filteredSortedPayRows() {
 function renderPayTable() {
   if (!payData) return;
   const w = canWrite();
-  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × Working Days. Only Active employees shown.`;
+  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × Working Days. Shows employees on this month's payroll (joining/leaving dates respected); salary is as it was that month.`;
   $("recBanner").innerHTML = payData.pending && w
     ? `<div style="background:rgba(255,176,61,.1);border:1px solid #4a3a20;color:var(--brand2);padding:9px 13px;border-radius:8px;margin-bottom:12px">⚠ ${payData.pending} recovery(ies) not yet posted. <button class="btn sm" id="bannerPost">Post Recoveries</button></div>` : "";
   if ($("bannerPost")) $("bannerPost").addEventListener("click", postRecoveries);
@@ -497,12 +523,13 @@ $("payBody").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-unpost]"); if (!b) return;
   const mode = b.dataset.mode;
   if (!confirm(mode === "delete" ? "Delete this recovery? The amount returns to the balance." : "Un-post to edit? The amount returns to the balance.")) return;
-  try { await api(`/api/payroll/${mk()}/unpost/${b.dataset.unpost}`, { method: "POST", body: { mode } }); toast("Done"); renderPayroll(); }
+  try { const r = await api(`/api/payroll/${mk()}/unpost/${b.dataset.unpost}`, { method: "POST", body: { mode } });
+    toast(r && r.queued ? "✋ Sent for admin approval" : "Done"); renderPayroll(); }
   catch (err) { toast(err.error, true); }
 });
 async function postRecoveries() {
   try { const r = await api(`/api/payroll/${mk()}/post-recoveries`, { method: "POST", body: {} });
-    toast(r.posted ? `Posted for ${r.posted} employee(s)` : "Nothing to post — set installments"); renderPayroll(); }
+    toast(r.queued ? "✋ Sent for admin approval" : r.posted ? `Posted for ${r.posted} employee(s)` : "Nothing to post — set installments"); renderPayroll(); }
   catch (e) { toast(e.error, true); }
 }
 function payExportRows() {
@@ -591,12 +618,12 @@ function advModal(id) {
   $("mSave").addEventListener("click", async () => {
     const body = { empId: Number($("a_emp").value), date: $("a_date").value, amount: Number($("a_amount").value || 0), reason: $("a_reason").value, installment: Number($("a_inst").value || 0) };
     if (body.amount <= 0) return toast("Enter an amount", true);
-    try { if (id) await api("/api/advances/" + id, { method: "PUT", body }); else await api("/api/advances", { method: "POST", body });
-      closeModal(); toast("Saved"); loadAdvances(); } catch (err) { toast(err.error, true); }
+    try { const r = id ? await api("/api/advances/" + id, { method: "PUT", body }) : await api("/api/advances", { method: "POST", body });
+      closeModal(); toast(r && r.queued ? "✋ Sent for admin approval" : "Saved"); loadAdvances(); } catch (err) { toast(err.error, true); }
   });
 }
 async function delAdv(id) { if (!confirm("Delete this advance and its history?")) return;
-  try { await api("/api/advances/" + id, { method: "DELETE" }); toast("Deleted"); loadAdvances(); } catch (e) { toast(e.error, true); } }
+  try { const r = await api("/api/advances/" + id, { method: "DELETE" }); toast(r && r.queued ? "✋ Sent for admin approval" : "Deleted"); loadAdvances(); } catch (e) { toast(e.error, true); } }
 async function ledgerModal(id) {
   const w = canWrite();
   openModal(`<h3>Advance Ledger</h3><div style="padding:16px 20px" id="ledgerArea">Loading…</div><div class="foot"><button class="btn ghost" data-close>Close</button></div>`); wireClose();
@@ -617,12 +644,14 @@ async function renderLedger(id, w) {
   if (w) {
     $("rAdd").addEventListener("click", async () => {
       const amt = Number($("rAmt").value || 0); if (amt <= 0) return toast("Enter amount", true);
-      try { await api(`/api/advances/${id}/payments`, { method: "POST", body: { amount: amt, date: $("rDate").value, note: $("rNote").value } });
-        renderLedger(id, w); loadAdvances(); toast("Added"); } catch (e) { toast(e.error, true); }
+      try { const r = await api(`/api/advances/${id}/payments`, { method: "POST", body: { amount: amt, date: $("rDate").value, note: $("rNote").value } });
+        renderLedger(id, w); loadAdvances(); toast(r && r.queued ? "✋ Sent for admin approval" : "Added"); } catch (e) { toast(e.error, true); }
     });
     $("ledgerArea").querySelectorAll("[data-delpay]").forEach((b) => b.addEventListener("click", async () => {
       if (!confirm("Remove this entry? The amount returns to the balance.")) return;
-      try { await api(`/api/advances/${id}/payments/${b.dataset.delpay}`, { method: "DELETE" }); renderLedger(id, w); loadAdvances(); } catch (e) { toast(e.error, true); }
+      try { const r = await api(`/api/advances/${id}/payments/${b.dataset.delpay}`, { method: "DELETE" });
+        if (r && r.queued) toast("✋ Sent for admin approval");
+        renderLedger(id, w); loadAdvances(); } catch (e) { toast(e.error, true); }
     }));
   }
 }
@@ -848,6 +877,42 @@ function resetPwModal(id) {
     try { await api(`/api/users/${id}/reset-password`, { method: "POST", body: { password: $("rp_pw").value } }); closeModal(); toast("Password reset"); } catch (e) { toast(e.error, true); }
   });
 }
+
+/* ================= APPROVALS (admin checker) ================= */
+async function loadApprovals() {
+  if (!isAdmin()) return;
+  let d; try { d = await api("/api/approvals"); } catch (e) { return toast(e.error, true); }
+  const card = (a) => `<div class="cmp-card" style="margin-bottom:12px">
+    <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:240px">
+        <b>${esc(a.summary)}</b>
+        ${a.detail ? `<div class="hint" style="white-space:pre-line;margin-top:6px">${esc(a.detail)}</div>` : ""}
+        <div class="hint" style="margin-top:6px">Requested by <b>${esc(a.requested_by_name)}</b> · ${esc((a.requested_at || "").slice(0, 16))}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn primary" data-approve="${a.id}">✔ Approve</button>
+        <button class="btn danger" data-rejectid="${a.id}">✖ Reject</button>
+      </div>
+    </div></div>`;
+  $("aprPending").innerHTML = d.pending.length ? d.pending.map(card).join("")
+    : '<div class="hint">Nothing waiting for approval. Changes made by HR users to salaries, bank details, advances or recoveries will appear here.</div>';
+  $("aprDecided").innerHTML = d.decided.length ? d.decided.map((a) =>
+    `<div class="mini"><span>${a.status === "approved" ? "✅" : "🚫"} ${esc(a.summary)}<br>
+      <span class="hint">by ${esc(a.requested_by_name)} · ${esc(a.status)} by ${esc(a.decided_by || "—")} ${esc((a.decided_at || "").slice(0, 16))}${a.note ? " · " + esc(a.note) : ""}</span></span></div>`
+  ).join("") : '<div class="hint">No decisions yet.</div>';
+  $("aprPending").querySelectorAll("[data-approve]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Approve and apply this change?")) return;
+    try { await api(`/api/approvals/${b.dataset.approve}/approve`, { method: "POST", body: {} }); toast("Approved & applied"); loadApprovals(); }
+    catch (e) { toast(e.error, true); }
+  }));
+  $("aprPending").querySelectorAll("[data-rejectid]").forEach((b) => b.addEventListener("click", async () => {
+    const note = prompt("Reason for rejecting (optional):");
+    if (note === null) return;
+    try { await api(`/api/approvals/${b.dataset.rejectid}/reject`, { method: "POST", body: { note } }); toast("Rejected"); loadApprovals(); }
+    catch (e) { toast(e.error, true); }
+  }));
+}
+$("btnAprRefresh").addEventListener("click", () => loadApprovals());
 
 /* ================= DASHBOARD ================= */
 async function renderDashboard() {
