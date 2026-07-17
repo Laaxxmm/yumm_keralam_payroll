@@ -34,7 +34,8 @@ router.get("/:mk", (req, res) => {
 // would let z.coerce.number() turn null into 0, making it impossible to clear
 // an override (it would stay stuck at 0).
 const AdjustSchema = z.object({
-  wd: z.coerce.number().int().min(0).max(366).nullable().optional(),
+  // Working days may be fractional (a half-day worked = 0.5), e.g. from attendance.
+  wd: z.coerce.number().min(0).max(366).nullable().optional(),
   bonus: z.coerce.number().int().min(0).max(100_000_000).optional(),
   ded: z.coerce.number().int().min(0).max(100_000_000).optional(),
   adv: z.coerce.number().int().min(0).max(100_000_000).nullable().optional(),

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20260714b">
+<link rel="stylesheet" href="/styles.css?v=20260714c">
 </head>
 <body>
 <!-- Login -->
@@ -71,6 +71,8 @@
             <span class="pill active" data-b="cal">Calendar</span><span class="pill" data-b="30">30</span><span class="pill" data-b="26">26</span>
           </div></div>
         <div class="grow"></div>
+        <button class="btn write-only" id="btnAttImport">⬆ Attendance</button>
+        <input type="file" id="attFile" accept=".csv,text/csv" hidden>
         <button class="btn write-only" id="btnPostRec">✅ Post Recoveries</button>
         <button class="btn" id="btnExportPay">⬇ CSV</button>
         <button class="btn" id="btnExportPayXlsx">⬇ Excel</button>
@@ -171,6 +173,6 @@
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20260714b"></script>
+<script src="/app.js?v=20260714c"></script>
 </body>
 </html>

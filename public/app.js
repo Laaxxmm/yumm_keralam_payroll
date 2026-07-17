@@ -527,7 +527,7 @@ function renderPayTable() {
     return `<tr>
       <td><strong>${esc(r.name)}</strong></td><td><span class="chip">${esc(r.desig || "—")}</span></td><td><span class="chip loc">${esc(r.loc || "—")}</span></td>
       <td class="num">${fmt(r.salary)}</td>
-      <td class="num">${w ? `<input class="wd-input" type="number" min="0" value="${r.wd}" data-adj="wd" data-id="${r.id}">` : r.wd}</td>
+      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wd}" data-adj="wd" data-id="${r.id}">` : r.wd}</td>
       <td class="num">${fmt(r.earned)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
@@ -570,6 +570,71 @@ function payExportRows() {
   return rows;
 }
 function payFileBase() { return `Payroll_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`; }
+
+/* -------- Import attendance → Working Days for the selected month --------
+   Reads a CSV (Name, Present Days) — e.g. exported from a Petpooja Attendance
+   Master, where Present Days = Full Days + ½ × Half Days. Matches each row to an
+   employee (review before apply) and sets Working Days for the shown month. */
+$("btnAttImport").addEventListener("click", () => $("attFile").click());
+$("attFile").addEventListener("change", async () => {
+  const f = $("attFile").files[0]; $("attFile").value = "";
+  if (!f) return;
+  let text; try { text = await f.text(); } catch { return toast("Could not read that file", true); }
+  const rows = parseCSV(text);
+  if (rows.length < 2) return toast("No rows found in the CSV", true);
+  const hdr = rows[0].map((h) => normName(h));
+  const col = (...names) => { for (const n of names) { const i = hdr.indexOf(normName(n)); if (i >= 0) return i; } return -1; };
+  const ci = { name: col("Name", "Employee Name", "Employee"), present: col("Present Days", "Present", "Working Days", "Days", "Payable Days") };
+  if (ci.name < 0 || ci.present < 0) return toast("CSV needs a Name and a Present Days column", true);
+  if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch (e) { return toast(e.error, true); } }
+  const data = rows.slice(1).map((r) => ({ name: (r[ci.name] || "").trim(), present: Number(String(r[ci.present] || "").replace(/[^0-9.]/g, "")) }))
+    .filter((d) => d.name && isFinite(d.present));
+  if (!data.length) return toast("No usable rows (need Name + Present Days)", true);
+  data.forEach((d) => { const m = matchEmployee(d.name, ""); d.matchId = m.id; d.conf = m.conf; });
+  attImportPreview(data);
+});
+function attImportPreview(data) {
+  const emps = [...state.employees].sort((a, b) => a.name.localeCompare(b.name));
+  const opts = (sel) => `<option value="">— skip —</option>` +
+    emps.map((e) => `<option value="${e.id}" ${e.id === sel ? "selected" : ""}>${esc(e.name)} · ${esc(e.loc || "")}</option>`).join("");
+  const flagOf = (c) => ({ exact: "✅", guess: "🟡", ambiguous: "⚠️", none: "❓" }[c] || "");
+  const cur = (id) => (payData && payData.rows.find((r) => r.id === id));
+  const body = data.map((d, i) => `<tr>
+      <td>${flagOf(d.conf)} <b>${esc(d.name)}</b></td>
+      <td class="num"><b>${d.present}</b></td>
+      <td><select class="att-emp" data-i="${i}" style="min-width:190px">${opts(d.matchId)}</select>
+        ${d.matchId && cur(d.matchId) ? `<br><span class="hint">now: ${cur(d.matchId).wd} wd</span>` : ""}</td>
+    </tr>`).join("");
+  const needs = data.filter((d) => !d.matchId || d.conf !== "exact").length;
+  const label = payData ? payData.label : mk();
+  openModal(`<h3>Import attendance → Working Days for ${esc(label)}</h3>
+    <div style="padding:12px 20px;max-height:62vh;overflow:auto">
+      <div class="hint" style="margin-bottom:10px">✅ exact · 🟡 best guess · ⚠️ ambiguous · ❓ no match. <b>${needs}</b> row(s) worth checking. Present Days = full + ½ × half days. Applying sets each employee's <b>Working Days</b> for <b>${esc(label)}</b>.</div>
+      <table><thead><tr><th>Attendance name</th><th class="num">Present Days</th><th>Employee</th></tr></thead><tbody id="attPrevBody">${body}</tbody></table>
+    </div>
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="btnAttApply">Apply</button></div>`, { protect: true });
+  wireClose();
+  $("attPrevBody").addEventListener("change", (e) => {
+    const s = e.target.closest(".att-emp"); if (!s) return;
+    data[Number(s.dataset.i)].matchId = s.value ? Number(s.value) : null;
+  });
+  $("btnAttApply").addEventListener("click", () => applyAttImport(data));
+}
+async function applyAttImport(data) {
+  const toApply = data.filter((d) => d.matchId);
+  if (!toApply.length) return toast("Nothing selected to apply", true);
+  const monthMk = mk(), label = payData ? payData.label : monthMk;
+  if (!confirm(`Set Working Days for ${new Set(toApply.map((d) => d.matchId)).size} employee(s) for ${label}?`)) return;
+  const btn = $("btnAttApply"); if (btn) { btn.disabled = true; btn.textContent = "Applying…"; }
+  let ok = 0, fail = 0;
+  for (const d of toApply) {
+    try { await api(`/api/payroll/${monthMk}/${d.matchId}`, { method: "PUT", body: { wd: d.present } }); ok++; }
+    catch { fail++; }
+  }
+  closeModal();
+  toast(`Working days set for ${ok} employee(s)${fail ? `, ${fail} failed` : ""}`);
+  renderPayroll();
+}
 
 /* ================= ADVANCES ================= */
 async function loadAdvances() {
