@@ -313,8 +313,34 @@ async function historyModal(e) {
     <div style="padding:14px 20px;max-height:60vh;overflow:auto">
       ${rows.length ? rows.map(line).join("") : '<div class="hint">No salary or designation changes recorded yet. Changes made from now on (with their effective date) will appear here.</div>'}
     </div>
-    <div class="foot"><button class="btn ghost" data-close>Close</button></div>`);
+    <div class="foot"><button class="btn ghost" data-close>Close</button>
+      ${rows.length ? '<button class="btn primary" id="hDoc">⬇ Download (Word)</button>' : ""}</div>`);
   wireClose();
+  if (rows.length) {
+    $("hDoc").addEventListener("click", async () => {
+      const c = await ensureCompany();
+      downloadDoc("SalaryHistory_" + safe(e.name), historyDocHtml(e, c, rows));
+    });
+  }
+}
+/** Salary & designation change history as a letterhead Word document. */
+function historyDocHtml(e, c, rows) {
+  const isoToDmy = (iso) => { const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}.${m[2]}.${m[1]}` : (iso || ""); };
+  const money = (v) => "₹" + Math.round(Number(v) || 0).toLocaleString("en-IN");
+  const th = (t) => `<td style="font-weight:bold">${t}</td>`;
+  // Oldest → newest reads best in a formal record (the on-screen list is newest-first).
+  const body = [...rows].reverse().map((h) => {
+    const isSal = h.field === "salary";
+    return `<tr><td>${isSal ? "Salary (CTC)" : "Designation"}</td>
+      <td>${isSal ? money(h.old_value) : esc(h.old_value || "—")}</td>
+      <td>${isSal ? money(h.new_value) : esc(h.new_value || "—")}</td>
+      <td>${esc(isoToDmy(h.effective))}</td><td>${esc(h.changed_by || "—")}</td><td>${esc((h.changed_at || "").slice(0, 10))}</td></tr>`;
+  }).join("");
+  return docWrap(`<h2>SALARY &amp; DESIGNATION HISTORY</h2>
+    <p><b>Employee:</b> ${esc(e.name)}${e.desig ? " &nbsp;·&nbsp; " + esc(e.desig) : ""}${e.loc ? " &nbsp;·&nbsp; " + esc(e.loc) : ""}${e.joining ? " &nbsp;·&nbsp; Joined " + esc(e.joining) : ""}</p>
+    <table><tr>${th("Change")}${th("From")}${th("To")}${th("Effective")}${th("Recorded By")}${th("Recorded On")}</tr>
+      ${body}</table>
+    <p style="margin-top:22px" class="hint">Generated on ${todayStr()} from the Yumm HR system. This document reflects the recorded change log and is for reference.</p>`, c);
 }
 const safe = (n) => String(n).replace(/[^\w]+/g, "_");
 /** The letterhead needs the company profile; it may not be loaded yet if the
