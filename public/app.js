@@ -579,17 +579,30 @@ $("btnAttImport").addEventListener("click", () => $("attFile").click());
 $("attFile").addEventListener("change", async () => {
   const f = $("attFile").files[0]; $("attFile").value = "";
   if (!f) return;
-  let text; try { text = await f.text(); } catch { return toast("Could not read that file", true); }
-  const rows = parseCSV(text);
-  if (rows.length < 2) return toast("No rows found in the CSV", true);
-  const hdr = rows[0].map((h) => normName(h));
-  const col = (...names) => { for (const n of names) { const i = hdr.indexOf(normName(n)); if (i >= 0) return i; } return -1; };
-  const ci = { name: col("Name", "Employee Name", "Employee"), present: col("Present Days", "Present", "Working Days", "Days", "Payable Days") };
-  if (ci.name < 0 || ci.present < 0) return toast("CSV needs a Name and a Present Days column", true);
-  if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch (e) { return toast(e.error, true); } }
-  const data = rows.slice(1).map((r) => ({ name: (r[ci.name] || "").trim(), present: Number(String(r[ci.present] || "").replace(/[^0-9.]/g, "")) }))
-    .filter((d) => d.name && isFinite(d.present));
-  if (!data.length) return toast("No usable rows (need Name + Present Days)", true);
+  const isPdf = /\.pdf$/i.test(f.name) || f.type === "application/pdf";
+  let data;
+  if (isPdf) {
+    // Petpooja Attendance Master PDF — parsed server-side into present days.
+    toast("Reading attendance PDF…");
+    const fd = new FormData(); fd.append("file", f);
+    let resp;
+    try { resp = await api("/api/payroll/parse-attendance", { method: "POST", body: fd }); }
+    catch (e) { return toast(e.error || "Could not read that PDF", true); }
+    if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch {} }
+    data = resp.rows.map((r) => ({ name: r.name || String(r.id), present: r.present }));
+  } else {
+    let text; try { text = await f.text(); } catch { return toast("Could not read that file", true); }
+    const rows = parseCSV(text);
+    if (rows.length < 2) return toast("No rows found in the file", true);
+    const hdr = rows[0].map((h) => normName(h));
+    const col = (...names) => { for (const n of names) { const i = hdr.indexOf(normName(n)); if (i >= 0) return i; } return -1; };
+    const ci = { name: col("Name", "Employee Name", "Employee"), present: col("Present Days", "Present", "Working Days", "Days", "Payable Days") };
+    if (ci.name < 0 || ci.present < 0) return toast("CSV needs a Name and a Present Days column", true);
+    if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch (e) { return toast(e.error, true); } }
+    data = rows.slice(1).map((r) => ({ name: (r[ci.name] || "").trim(), present: Number(String(r[ci.present] || "").replace(/[^0-9.]/g, "")) }));
+  }
+  data = data.filter((d) => d.name && isFinite(d.present));
+  if (!data.length) return toast("No usable rows found", true);
   data.forEach((d) => { const m = matchEmployee(d.name, ""); d.matchId = m.id; d.conf = m.conf; });
   attImportPreview(data);
 });

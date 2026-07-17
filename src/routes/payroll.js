@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import multer from "multer";
 import { getDb, audit } from "../db.js";
 import { requireRole } from "../auth.js";
 import {
@@ -7,9 +8,33 @@ import {
   postRecoveries, unpostRecovery,
 } from "../services/payroll.js";
 import { queueApproval } from "../services/approvals.js";
+import { parseAttendancePdf } from "../services/attendance.js";
 
 const router = Router();
 const MK_RE = /^\d{4}-(?:[0-9]|1[01])$/; // YYYY-monthIndex(0..11)
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+
+/**
+ * POST /api/payroll/parse-attendance — upload a Petpooja Attendance Master PDF;
+ * returns per-employee working days for review (no data is written here).
+ */
+router.post("/parse-attendance", requireRole("admin", "hr"), pdfUpload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+  if (req.file.buffer.subarray(0, 4).toString() !== "%PDF")
+    return res.status(400).json({ error: "That file is not a PDF." });
+  try {
+    const { rows, statuses } = await parseAttendancePdf(req.file.buffer);
+    audit(req, "attendance.parse", "payroll", null, `${rows.length} employees`);
+    res.json({ rows, statuses });
+  } catch (e) {
+    res.status(400).json({ error: e.message || "Could not read that PDF." });
+  }
+});
+router.use("/parse-attendance", (err, _req, res, next) => {
+  if (err instanceof multer.MulterError)
+    return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "PDF is larger than 20 MB." : "Upload rejected." });
+  next(err);
+});
 
 /** GET /api/payroll/:mk?basis=cal|30|26 — server-computed rows + totals. */
 router.get("/:mk", (req, res) => {
