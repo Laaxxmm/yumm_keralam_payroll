@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20260714e">
+<link rel="stylesheet" href="/styles.css?v=20260715a">
 </head>
 <body>
 <!-- Login -->
@@ -58,6 +58,7 @@
       <table><thead><tr>
         <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Location</th>
         <th data-sort="joining">Joining</th><th class="num" data-sort="salary">Salary</th>
+        <th class="num" data-sort="salaryDate">Salary Date</th>
         <th>Phone</th><th data-sort="status">Status</th><th></th>
       </tr></thead><tbody id="empBody"></tbody></table>
     </section>
@@ -83,10 +84,13 @@
         <input class="search" id="paySearch" type="search" name="pay-search" autocomplete="off" placeholder="🔍 Search name, designation…">
         <select id="payLoc"><option value="">All Locations</option></select>
         <select id="payDesig"><option value="">All Designations</option></select>
+        <select id="payDate"><option value="">All Pay Dates</option></select>
       </div>
       <table><thead><tr>
         <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Loc</th>
-        <th class="num" data-sort="salary">Salary</th><th class="num" data-sort="wd">Work Days</th>
+        <th class="num" data-sort="salaryDate">Pay Date</th>
+        <th class="num" data-sort="salary">Salary</th>
+        <th class="num" data-sort="wo">Week Off</th><th class="num" data-sort="lv">Leaves</th><th class="num" data-sort="wd">Work Days</th>
         <th class="num" data-sort="earned">Earned</th><th class="num" data-sort="bonus">+Bonus</th>
         <th class="num" data-sort="ded">−Other Ded.</th><th class="num" data-sort="rec">−Adv. Recovery</th>
         <th class="num" data-sort="net">Net Payable</th>
@@ -173,6 +177,6 @@
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20260714e"></script>
+<script src="/app.js?v=20260715a"></script>
 </body>
 </html>

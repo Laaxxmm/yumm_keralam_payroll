@@ -61,27 +61,34 @@ router.get("/:mk", (req, res) => {
 const AdjustSchema = z.object({
   // Working days may be fractional (a half-day worked = 0.5), e.g. from attendance.
   wd: z.coerce.number().min(0).max(366).nullable().optional(),
+  wo: z.coerce.number().min(0).max(366).optional(),   // week off days
+  lv: z.coerce.number().min(0).max(366).optional(),   // leave days
   bonus: z.coerce.number().int().min(0).max(100_000_000).optional(),
   ded: z.coerce.number().int().min(0).max(100_000_000).optional(),
   adv: z.coerce.number().int().min(0).max(100_000_000).nullable().optional(),
 });
 
-/** PUT /api/payroll/:mk/:empId — set working days / bonus / deduction / recovery override. */
+/** PUT /api/payroll/:mk/:empId — set working days / week off / leaves / bonus / deduction / recovery override. */
 router.put("/:mk/:empId", requireRole("admin", "hr"), (req, res) => {
   const mk = req.params.mk, empId = Number(req.params.empId);
   if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
   const parsed = AdjustSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const cur = getDb().prepare("SELECT * FROM payroll_adjust WHERE mk=? AND emp_id=?").get(mk, empId) || {};
-  const wd = "wd" in parsed.data ? parsed.data.wd : cur.wd ?? null;
+  // Setting week off or leaves means Work Days is computed from them, so clear
+  // any direct wd override unless wd is explicitly given in the same request.
+  const woLvGiven = "wo" in parsed.data || "lv" in parsed.data;
+  const wd = "wd" in parsed.data ? parsed.data.wd : (woLvGiven ? null : cur.wd ?? null);
+  const wo = "wo" in parsed.data ? parsed.data.wo : cur.wo ?? 0;
+  const lv = "lv" in parsed.data ? parsed.data.lv : cur.lv ?? 0;
   const bonus = "bonus" in parsed.data ? parsed.data.bonus : cur.bonus ?? 0;
   const ded = "ded" in parsed.data ? parsed.data.ded : cur.ded ?? 0;
   const adv = "adv" in parsed.data ? parsed.data.adv : cur.adv ?? null;
   getDb().prepare(
-    `INSERT INTO payroll_adjust (mk, emp_id, wd, bonus, ded, adv, adv_posted)
-       VALUES (?,?,?,?,?,?, COALESCE((SELECT adv_posted FROM payroll_adjust WHERE mk=? AND emp_id=?),0))
-     ON CONFLICT(mk, emp_id) DO UPDATE SET wd=excluded.wd, bonus=excluded.bonus, ded=excluded.ded, adv=excluded.adv`
-  ).run(mk, empId, wd, bonus, ded, adv, mk, empId);
+    `INSERT INTO payroll_adjust (mk, emp_id, wd, wo, lv, bonus, ded, adv, adv_posted)
+       VALUES (?,?,?,?,?,?,?,?, COALESCE((SELECT adv_posted FROM payroll_adjust WHERE mk=? AND emp_id=?),0))
+     ON CONFLICT(mk, emp_id) DO UPDATE SET wd=excluded.wd, wo=excluded.wo, lv=excluded.lv, bonus=excluded.bonus, ded=excluded.ded, adv=excluded.adv`
+  ).run(mk, empId, wd, wo, lv, bonus, ded, adv, mk, empId);
   res.json({ ok: true });
 });
 

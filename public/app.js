@@ -151,7 +151,7 @@ function renderEmp() {
       <td><strong>${esc(e.name)}</strong>${cnt ? ` <span class="chip">📎${cnt}</span>` : ""}</td>
       <td><span class="chip">${esc(e.desig || "—")}</span></td>
       <td><span class="chip loc">${esc(e.loc || "—")}</span></td>
-      <td>${esc(e.joining || "—")}</td><td class="num">${fmt(e.salary)}</td><td>${esc(e.phone || "—")}</td>
+      <td>${esc(e.joining || "—")}</td><td class="num">${fmt(e.salary)}</td><td class="num">${esc(e.salaryDate || "—")}</td><td>${esc(e.phone || "—")}</td>
       <td><span class="badge ${inactive ? "inactive" : "active"}" ${w ? `data-act="togglestatus" data-id="${e.id}"` : ""}>${inactive ? "Inactive" : "Active"}</span></td>
       <td><div class="rowbtns">
         <button class="icon-btn" data-act="kyc" data-id="${e.id}" title="KYC documents">📎</button>
@@ -160,7 +160,7 @@ function renderEmp() {
         ${w ? `<button class="icon-btn" data-act="edit" data-id="${e.id}" title="Edit">✎</button>` : ""}
         ${del ? `<button class="icon-btn del" data-act="del" data-id="${e.id}" title="Delete">🗑</button>` : ""}
       </div></td></tr>`;
-  }).join("") : `<tr><td colspan="8" class="empty">No employees match.</td></tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">No employees match.</td></tr>`;
   document.querySelectorAll("#view-emp thead th").forEach((th) =>
     th.classList.toggle("sorted", th.dataset.sort === state.empSort.k));
 }
@@ -175,7 +175,8 @@ $("btnAddEmp").addEventListener("click", () => empModal(null));
 const EMP_FIELDS = [
   ["name","Name *","full"],["desig","Designation"],["loc","Location"],["joining","Joining (dd.mm.yyyy)"],
   ["leaving","Leaving (dd.mm.yyyy)"],
-  ["salary","Monthly Salary (₹)","","number"],["phone","Phone"],["status","Status","","status"],
+  ["salary","Monthly Salary (₹)","","number"],["salaryDate","Salary Date (day, e.g. 5 or 10)"],
+  ["phone","Phone"],["status","Status","","status"],
   ["effectiveFrom","Change Effective From (dd.mm.yyyy)"],
   ["__s1","Report details","sechead"],
   ["fatherName","Father's Name"],["dob","Date of Birth"],["address","Full Address","full"],
@@ -234,7 +235,8 @@ async function toggleStatus(id) {
 }
 function empExportRows() {
   const cols = [["name","Name"],["desig","Designation"],["loc","Location"],["status","Status"],["joining","Joining"],
-    ["salary","Salary"],["phone","Phone"],["bankName","Bank"],["accName","Acc Holder"],["accNo","Account No"],["ifsc","IFSC"],["upi","UPI"]];
+    ["leaving","Leaving"],["salary","Salary"],["salaryDate","Salary Date"],["phone","Phone"],
+    ["bankName","Bank"],["accName","Acc Holder"],["accNo","Account No"],["ifsc","IFSC"],["upi","UPI"],["documents","List of Documents"]];
   const rows = [cols.map((c) => c[1])];
   filteredEmp().forEach((e) => rows.push(cols.map((c) => (e[c[0]] == null ? "" : e[c[0]]))));
   return rows;
@@ -476,7 +478,7 @@ function initPayControls() {
   $("btnPostRec").addEventListener("click", postRecoveries);
   $("btnExportPay").addEventListener("click", () => { if (payData) downloadCSV(payFileBase() + ".csv", payExportRows()); });
   $("btnExportPayXlsx").addEventListener("click", () => { if (payData) downloadXLSX(payFileBase() + ".xlsx", "Payroll", payExportRows()); });
-  ["paySearch", "payLoc", "payDesig"].forEach((id) => $(id).addEventListener("input", renderPayTable));
+  ["paySearch", "payLoc", "payDesig", "payDate"].forEach((id) => $(id).addEventListener("input", renderPayTable));
   wireSortHeader("#view-pay", state.paySort, renderPayTable);
 }
 let payData = null;
@@ -502,18 +504,20 @@ function fillPayFilters() {
     if ([...s.options].some((o) => o.value === cur)) s.value = cur; };
   setOpts("payLoc", [...new Set(payData.rows.map((r) => r.loc).filter(Boolean))].sort(), "All Locations");
   setOpts("payDesig", [...new Set(payData.rows.map((r) => r.desig).filter(Boolean))].sort(), "All Designations");
+  setOpts("payDate", [...new Set(payData.rows.map((r) => r.salaryDate).filter(Boolean))].sort((a, b) => a - b), "All Pay Dates");
 }
-/** Rows for display: apply the search box + location/designation filters + sort. */
+/** Rows for display: apply search + location/designation/pay-date filters + sort. */
 function filteredSortedPayRows() {
   if (!payData) return [];
-  const q = $("paySearch").value.trim().toLowerCase(), loc = $("payLoc").value, des = $("payDesig").value;
+  const q = $("paySearch").value.trim().toLowerCase(), loc = $("payLoc").value, des = $("payDesig").value, pd = $("payDate").value;
   const list = payData.rows.filter((r) => {
     if (loc && r.loc !== loc) return false;
     if (des && r.desig !== des) return false;
+    if (pd && String(r.salaryDate) !== pd) return false;
     if (q && !(`${r.name} ${r.desig} ${r.loc}`.toLowerCase().includes(q))) return false;
     return true;
   });
-  return applySort(list, state.paySort, (r, k) => r[k], ["salary", "wd", "earned", "bonus", "ded", "rec", "net"]);
+  return applySort(list, state.paySort, (r, k) => r[k], ["salary", "salaryDate", "wo", "lv", "wd", "earned", "bonus", "ded", "rec", "net"]);
 }
 /** Render the payroll table body/footer from the current filter+sort state
  *  (no refetch — reuses the last payData). Totals reflect the shown rows. */
@@ -531,15 +535,18 @@ function renderPayTable() {
       : w ? `<input class="adj-input" type="number" min="0" value="${r.advOverride != null ? r.advOverride : ""}" placeholder="${r.rec}" data-adj="adv" data-id="${r.id}">` : fmt(r.rec);
     return `<tr>
       <td><strong>${esc(r.name)}</strong></td><td><span class="chip">${esc(r.desig || "—")}</span></td><td><span class="chip loc">${esc(r.loc || "—")}</span></td>
+      <td class="num">${esc(r.salaryDate || "—")}</td>
       <td class="num">${fmt(r.salary)}</td>
-      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wd}" data-adj="wd" data-id="${r.id}">` : r.wd}</td>
+      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wo || ""}" placeholder="0" data-adj="wo" data-id="${r.id}">` : r.wo}</td>
+      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.lv || ""}" placeholder="0" data-adj="lv" data-id="${r.id}">` : r.lv}</td>
+      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wd}" data-adj="wd" data-id="${r.id}" title="Base ${r.bd} − week off − leaves. Type to override.">` : r.wd}</td>
       <td class="num">${fmt(r.earned)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
       <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td></tr>`;
-  }).join("") || `<tr><td colspan="10" class="empty">No employees match.</td></tr>`;
+  }).join("") || `<tr><td colspan="13" class="empty">No employees match.</td></tr>`;
   const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
-  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="5">TOTAL — ${rows.length} employees</td>
+  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="8">TOTAL — ${rows.length} employees</td>
     <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td></tr>` : "";
   markSorted("#view-pay", state.paySort);
 }
@@ -565,11 +572,11 @@ async function postRecoveries() {
 }
 function payExportRows() {
   const bankOf = (id) => state.employees.find((e) => e.id === id) || {};
-  const rows = [["Name","Designation","Loc","Salary","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
+  const rows = [["Name","Designation","Loc","Pay Date","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
     "Bank Name","Account Holder","Account Number","IFSC","UPI"]];
   filteredSortedPayRows().forEach((r) => {
     const b = bankOf(r.id);
-    rows.push([r.name, r.desig, r.loc, r.salary, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
+    rows.push([r.name, r.desig, r.loc, r.salaryDate || "", r.salary, r.wo, r.lv, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
       b.bankName || "", b.accName || "", b.accNo || "", b.ifsc || "", b.upi || ""]);
   });
   return rows;

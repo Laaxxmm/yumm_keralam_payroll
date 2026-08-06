@@ -14,6 +14,7 @@ const EmployeeSchema = z.object({
   loc: z.string().trim().max(80).default(""),
   joining: z.string().trim().max(20).default(""),
   leaving: z.string().trim().max(20).default(""),
+  salaryDate: z.string().trim().max(10).default(""),   // day of month paid, e.g. "5" / "10"
   effectiveFrom: z.string().trim().max(20).default(""), // for salary/desig history, not a column
   salary: z.coerce.number().int().min(0).max(100_000_000).default(0),
   phone: z.string().trim().max(20).regex(/^[0-9+\-\s()]*$/, "Invalid phone").default(""),
@@ -47,7 +48,7 @@ function toApi(row, role) {
   const canSeeBank = role === "admin" || role === "hr";
   const out = {
     id: row.id, name: row.name, desig: row.desig, loc: row.loc, joining: row.joining,
-    leaving: row.leaving || "", salary: row.salary, phone: row.phone, status: row.status,
+    leaving: row.leaving || "", salaryDate: row.salary_date || "", salary: row.salary, phone: row.phone, status: row.status,
     fatherName: row.father_name, dob: row.dob, address: row.address,
     qualGen: row.qual_gen, qualTech: row.qual_tech, experience: row.experience,
     langRead: row.lang_read, langWrite: row.lang_write, langSpeak: row.lang_speak,
@@ -78,13 +79,13 @@ router.post("/", requireRole("admin", "hr"), (req, res) => {
   const info = getDb()
     .prepare(
       `INSERT INTO employees
-        (name,desig,loc,joining,leaving,salary,phone,status,father_name,dob,address,qual_gen,qual_tech,
+        (name,desig,loc,joining,leaving,salary_date,salary,phone,status,father_name,dob,address,qual_gen,qual_tech,
          experience,lang_read,lang_write,lang_speak,report_time,hobbies,documents,
          bank_name,acc_name,acc_no_enc,ifsc,branch,upi)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .run(
-      e.name, e.desig, e.loc, e.joining, e.leaving, e.salary, e.phone, e.status, e.fatherName, e.dob,
+      e.name, e.desig, e.loc, e.joining, e.leaving, e.salaryDate, e.salary, e.phone, e.status, e.fatherName, e.dob,
       e.address, e.qualGen, e.qualTech, e.experience, e.langRead, e.langWrite, e.langSpeak,
       e.reportTime, e.hobbies, e.documents, e.bankName, e.accName,
       encryptField(e.accNo), e.ifsc, e.branch, e.upi
@@ -110,13 +111,13 @@ export function applyEmployeeUpdate(id, e, req) {
   db.exec("BEGIN");
   try {
     db.prepare(
-      `UPDATE employees SET name=?,desig=?,loc=?,joining=?,leaving=?,salary=?,phone=?,status=?,
+      `UPDATE employees SET name=?,desig=?,loc=?,joining=?,leaving=?,salary_date=?,salary=?,phone=?,status=?,
          father_name=?,dob=?,address=?,qual_gen=?,qual_tech=?,experience=?,
          lang_read=?,lang_write=?,lang_speak=?,report_time=?,hobbies=?,documents=?,
          bank_name=?,acc_name=?,acc_no_enc=?,ifsc=?,branch=?,upi=?,updated_at=datetime('now')
        WHERE id=?`
     ).run(
-      e.name, e.desig, e.loc, e.joining, e.leaving, e.salary, e.phone, e.status, e.fatherName, e.dob,
+      e.name, e.desig, e.loc, e.joining, e.leaving, e.salaryDate, e.salary, e.phone, e.status, e.fatherName, e.dob,
       e.address, e.qualGen, e.qualTech, e.experience, e.langRead, e.langWrite, e.langSpeak,
       e.reportTime, e.hobbies, e.documents, e.bankName, e.accName,
       encryptField(e.accNo), e.ifsc, e.branch, e.upi, id

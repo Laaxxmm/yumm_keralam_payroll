@@ -216,6 +216,17 @@ function migrate(d) {
   if (!hasCol("employees", "leaving")) {
     d.exec("ALTER TABLE employees ADD COLUMN leaving TEXT NOT NULL DEFAULT ''");
   }
+  // Salary/payroll date: the day of the month this employee is paid (e.g. 5 or 10).
+  if (!hasCol("employees", "salary_date")) {
+    d.exec("ALTER TABLE employees ADD COLUMN salary_date TEXT NOT NULL DEFAULT ''");
+  }
+  // Week-off and leave days, so Work Days = base days − week off − leaves.
+  if (!hasCol("payroll_adjust", "wo")) {
+    d.exec("ALTER TABLE payroll_adjust ADD COLUMN wo REAL NOT NULL DEFAULT 0");
+  }
+  if (!hasCol("payroll_adjust", "lv")) {
+    d.exec("ALTER TABLE payroll_adjust ADD COLUMN lv REAL NOT NULL DEFAULT 0");
+  }
 }
 
 /** Write an audit entry. Never throws — auditing must not break a request. */

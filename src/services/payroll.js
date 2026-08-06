@@ -104,7 +104,11 @@ export function recoveryFor(empId, mk) {
 export function computeRow(emp, mk, basis) {
   const bd = baseDaysFor(mk, basis);
   const adj = getAdjust(mk, emp.id);
-  const wd = adj && adj.wd != null ? adj.wd : bd;
+  const wo = adj ? (adj.wo || 0) : 0;   // week off days
+  const lv = adj ? (adj.lv || 0) : 0;   // leave days
+  // Work Days = base days − week off − leaves, unless a direct wd was set
+  // (e.g. from an attendance import, which stores present days directly).
+  const wd = adj && adj.wd != null ? adj.wd : Math.max(0, bd - wo - lv);
   const bonus = adj ? adj.bonus : 0;
   const ded = adj ? adj.ded : 0;
   // Pay the month with the salary/designation that was in force THAT month —
@@ -116,8 +120,9 @@ export function computeRow(emp, mk, basis) {
   const rec = recoveryFor(emp.id, mk);
   const net = earned + bonus - ded - rec;
   return {
-    id: emp.id, name: emp.name, desig, loc: emp.loc, salary,
-    wd, bd, earned, bonus, ded, rec, net,
+    id: emp.id, name: emp.name, desig, loc: emp.loc, salary, salaryDate: emp.salary_date || "",
+    wd, wo, lv, bd, earned, bonus, ded, rec, net,
+    wdOverride: adj ? adj.wd : null,
     advPosted: !!(adj && adj.adv_posted), advOverride: adj ? adj.adv : null,
   };
 }
