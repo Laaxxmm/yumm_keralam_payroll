@@ -351,20 +351,25 @@ async function ensureCompany() {
   }
   return state.company;
 }
+/**
+ * Company letterhead used by every report (bio-data, joining, offer, history).
+ * Matches the approved letterhead layout: centred company name + tagline, then
+ * address on the left with contact (line 1) and tax IDs (line 2) on the right,
+ * closed by a thin rule. Times New Roman, all black.
+ */
 function letterhead(c) {
-  const logo = c.logo ? `<img src="${c.logo}" width="92" height="92" style="border-radius:10px">` : "";
-  const line = [c.addr1, c.addr2].filter(Boolean).join(", ");
-  const place = [c.city, c.state].filter(Boolean).join(", ") + (c.pincode ? " – " + c.pincode : "");
-  return `<table style="width:100%;border-collapse:collapse;margin-bottom:6px"><tr>
-    <td style="border:none;width:108px">${logo}</td>
-    <td style="border:none;text-align:right">
-      <div style="font-size:22pt;font-weight:bold;color:#2f6b1e">${esc(c.name || "")}</div>
-      ${c.tagline ? `<div style="font-size:9pt;letter-spacing:2px;color:#c8791a;font-weight:bold">${esc(c.tagline)}</div>` : ""}
-      ${line ? `<div style="font-size:10.5pt">${esc(line)}</div>` : ""}
-      <div style="font-size:10.5pt">${esc(place)}</div>
-      <div style="font-size:10pt">${c.mobile ? "Mobile: " + esc(c.mobile) : ""} ${c.email ? " | Email: " + esc(c.email) : ""}</div>
-      <div style="font-size:10pt">${c.gstin ? "GSTIN: " + esc(c.gstin) : ""} ${c.pan ? " | PAN: " + esc(c.pan) : ""}</div>
-    </td></tr></table><hr style="border:none;border-top:2.5px solid #2f6b1e;margin:0 0 14px">`;
+  const addr1 = esc(c.addr1 || "");
+  const place = esc([c.addr2, [c.city, c.state].filter(Boolean).join(", ")].filter(Boolean).join(", ") +
+    (c.pincode ? " – " + c.pincode : ""));
+  const contact = [c.mobile ? "Mobile: " + esc(c.mobile) : "", c.email ? "Email: " + esc(c.email) : ""].filter(Boolean).join("; ");
+  const tax = [c.gstin ? "GSTIN: " + esc(c.gstin) : "", c.pan ? "PAN: " + esc(c.pan) : ""].filter(Boolean).join(" | ");
+  const cell = 'style="border:none;padding:0 0 1px;vertical-align:top"';
+  return `<table style="width:100%;border-collapse:collapse;border:none;margin-bottom:2px">
+    <tr><td colspan="2" style="border:none;padding:0;text-align:center"><b style="font-size:22pt;color:#000">${esc(c.name || "")}</b></td></tr>
+    ${c.tagline ? `<tr><td colspan="2" style="border:none;padding:0 0 4px;text-align:center"><b style="font-size:9pt;letter-spacing:1.5pt;color:#000">${esc(c.tagline)}</b></td></tr>` : `<tr><td colspan="2" style="border:none;height:6pt"></td></tr>`}
+    <tr><td ${cell} align="left"><b style="font-size:9pt">${addr1}</b></td><td ${cell} align="right"><b style="font-size:8pt">${contact}</b></td></tr>
+    <tr><td ${cell} align="left"><b style="font-size:9pt">${place}</b></td><td ${cell} align="right"><b style="font-size:8pt">${tax}</b></td></tr>
+  </table><hr style="border:none;border-top:1.2px solid #000;margin:1px 0 14px">`;
 }
 function docShell(bodyInner) {
   return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8">
