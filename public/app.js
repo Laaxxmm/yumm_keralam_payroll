@@ -524,7 +524,7 @@ function filteredSortedPayRows() {
 function renderPayTable() {
   if (!payData) return;
   const w = canWrite();
-  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × Working Days. Shows employees on this month's payroll (joining/leaving dates respected); salary is as it was that month.`;
+  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (base − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = base − Week Off − Leaves. Salary is as it was that month.`;
   $("recBanner").innerHTML = payData.pending && w
     ? `<div style="background:rgba(255,176,61,.1);border:1px solid #4a3a20;color:var(--brand2);padding:9px 13px;border-radius:8px;margin-bottom:12px">⚠ ${payData.pending} recovery(ies) not yet posted. <button class="btn sm" id="bannerPost">Post Recoveries</button></div>` : "";
   if ($("bannerPost")) $("bannerPost").addEventListener("click", postRecoveries);

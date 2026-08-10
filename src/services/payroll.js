@@ -104,11 +104,15 @@ export function recoveryFor(empId, mk) {
 export function computeRow(emp, mk, basis) {
   const bd = baseDaysFor(mk, basis);
   const adj = getAdjust(mk, emp.id);
-  const wo = adj ? (adj.wo || 0) : 0;   // week off days
-  const lv = adj ? (adj.lv || 0) : 0;   // leave days
-  // Work Days = base days − week off − leaves, unless a direct wd was set
-  // (e.g. from an attendance import, which stores present days directly).
-  const wd = adj && adj.wd != null ? adj.wd : Math.max(0, bd - wo - lv);
+  const wo = adj ? (adj.wo || 0) : 0;   // week off days (paid)
+  const lv = adj ? (adj.lv || 0) : 0;   // leave days (unpaid)
+  const override = adj && adj.wd != null;
+  // Work Days shown = base days − week off − leaves (actual days worked), unless
+  // a direct wd override is set (e.g. attendance import = present days).
+  const wd = override ? adj.wd : Math.max(0, bd - wo - lv);
+  // Pay: week off is PAID, so only leaves reduce it — paid days = base − leaves.
+  // With a direct override, pay follows the override (present days).
+  const paidDays = override ? adj.wd : Math.max(0, bd - lv);
   const bonus = adj ? adj.bonus : 0;
   const ded = adj ? adj.ded : 0;
   // Pay the month with the salary/designation that was in force THAT month —
@@ -116,7 +120,7 @@ export function computeRow(emp, mk, basis) {
   const monthEnd = monthRangeIso(mk).end;
   const salary = fieldAsOf(emp.id, "salary", monthEnd, emp.salary || 0);
   const desig = fieldAsOf(emp.id, "desig", monthEnd, emp.desig);
-  const earned = Math.round((salary || 0) * (wd / bd));
+  const earned = Math.round((salary || 0) * (paidDays / bd));
   const rec = recoveryFor(emp.id, mk);
   const net = earned + bonus - ded - rec;
   return {
