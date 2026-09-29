@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20260715b">
+<link rel="stylesheet" href="/styles.css?v=20260929a">
 </head>
 <body>
 <!-- Login -->
@@ -50,6 +50,8 @@
         <select id="empLoc"><option value="">All Locations</option></select>
         <select id="empDesig"><option value="">All Designations</option></select>
         <select id="empStatus"><option value="">All Status</option><option>Active</option><option>Inactive</option></select>
+        <select id="empJoinMonth"><option value="">All Join Months</option></select>
+        <span class="hint" id="empCount"></span>
         <button class="btn" id="btnExportEmp">⬇ CSV</button>
         <button class="btn" id="btnExportEmpXlsx">⬇ Excel</button>
         <button class="btn" id="btnOfferAll">📄 Offer Letters</button>
@@ -75,6 +77,7 @@
         <button class="btn write-only" id="btnAttImport">⬆ Attendance</button>
         <input type="file" id="attFile" accept=".pdf,application/pdf,.csv,text/csv" hidden>
         <button class="btn write-only" id="btnPostRec">✅ Post Recoveries</button>
+        <button class="btn" id="btnSlips">🧾 Salary Slips</button>
         <button class="btn" id="btnExportPay">⬇ CSV</button>
         <button class="btn" id="btnExportPayXlsx">⬇ Excel</button>
       </div>
@@ -89,11 +92,13 @@
       <table><thead><tr>
         <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Loc</th>
         <th class="num" data-sort="salaryDate">Pay Date</th>
+        <th data-sort="joining">Joining</th>
         <th class="num" data-sort="salary">Salary</th>
         <th class="num" data-sort="wo">Week Off</th><th class="num" data-sort="lv">Leaves</th><th class="num" data-sort="wd">Work Days</th>
         <th class="num" data-sort="earned">Earned</th><th class="num" data-sort="bonus">+Bonus</th>
         <th class="num" data-sort="ded">−Other Ded.</th><th class="num" data-sort="rec">−Adv. Recovery</th>
         <th class="num" data-sort="net">Net Payable</th>
+        <th>Slip</th>
       </tr></thead><tbody id="payBody"></tbody><tfoot id="payFoot"></tfoot></table>
     </section>
 
@@ -102,6 +107,7 @@
       <div class="toolbar">
         <input class="search" id="advSearch" type="search" name="adv-search" autocomplete="off" placeholder="🔍 Search employee, reason…">
         <select id="advLoc"><option value="">All Locations</option></select>
+        <select id="advMonth"><option value="">All Months</option></select>
         <select id="advStatus"><option value="">All Status</option><option value="open">Open</option><option value="closed">Closed</option></select>
         <button class="btn" id="btnExportAdv">⬇ CSV</button>
         <button class="btn" id="btnExportAdvXlsx">⬇ Excel</button>
@@ -177,6 +183,6 @@
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20260715b"></script>
+<script src="/app.js?v=20260929a"></script>
 </body>
 </html>

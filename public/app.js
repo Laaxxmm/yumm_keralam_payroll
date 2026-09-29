@@ -115,24 +115,35 @@ async function loadEmployees() {
   } catch (e) { toast(e.error, true); }
 }
 function uniq(key) { return [...new Set(state.employees.map((e) => e[key]).filter(Boolean))].sort(); }
+// dd.mm.yyyy (also / or -) → "YYYY-MM" month key ("" if unparseable); label "Mon YYYY".
+function monthKeyOf(s) { const m = String(s || "").match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/); return m ? `${m[3]}-${String(+m[2]).padStart(2, "0")}` : ""; }
+function monthKeyLabel(k) { const [y, mo] = k.split("-"); return `${MONTHS[+mo - 1]} ${y}`; }
+function fillMonthSelect(id, keys, all) {
+  const s = $(id), cur = s.value;
+  const sorted = [...new Set(keys.filter(Boolean))].sort().reverse(); // newest month first
+  s.innerHTML = `<option value="">${all}</option>` + sorted.map((k) => `<option value="${k}">${monthKeyLabel(k)}</option>`).join("");
+  if ([...s.options].some((o) => o.value === cur)) s.value = cur;
+}
 function fillEmpFilters() {
   const setOpts = (id, arr, all) => { const s = $(id), cur = s.value;
     s.innerHTML = `<option value="">${all}</option>` + arr.map((v) => `<option>${esc(v)}</option>`).join("");
     if ([...s.options].some((o) => o.value === cur)) s.value = cur; };
   setOpts("empLoc", uniq("loc"), "All Locations");
   setOpts("empDesig", uniq("desig"), "All Designations");
+  fillMonthSelect("empJoinMonth", state.employees.map((e) => monthKeyOf(e.joining)), "All Join Months");
 }
-["empSearch","empLoc","empDesig","empStatus"].forEach((id) => $(id).addEventListener("input", renderEmp));
+["empSearch","empLoc","empDesig","empStatus","empJoinMonth"].forEach((id) => $(id).addEventListener("input", renderEmp));
 document.querySelector("#view-emp thead").addEventListener("click", (e) => {
   const th = e.target.closest("th[data-sort]"); if (!th) return;
   const k = th.dataset.sort; if (state.empSort.k === k) state.empSort.d *= -1; else state.empSort = { k, d: 1 };
   renderEmp();
 });
 function filteredEmp() {
-  const q = $("empSearch").value.trim().toLowerCase(), loc = $("empLoc").value, des = $("empDesig").value, st = $("empStatus").value;
+  const q = $("empSearch").value.trim().toLowerCase(), loc = $("empLoc").value, des = $("empDesig").value, st = $("empStatus").value, jm = $("empJoinMonth").value;
   let list = state.employees.filter((e) => {
     if (loc && e.loc !== loc) return false; if (des && e.desig !== des) return false;
     if (st && (e.status || "Active") !== st) return false;
+    if (jm && monthKeyOf(e.joining) !== jm) return false;
     if (state.empExtra && !state.empExtra.test(e)) return false;
     if (q && !(`${e.name} ${e.desig} ${e.loc} ${e.phone || ""}`.toLowerCase().includes(q))) return false;
     return true;
@@ -161,6 +172,9 @@ function renderEmp() {
         ${del ? `<button class="icon-btn del" data-act="del" data-id="${e.id}" title="Delete">🗑</button>` : ""}
       </div></td></tr>`;
   }).join("") : `<tr><td colspan="9" class="empty">No employees match.</td></tr>`;
+  const cnt = $("empCount");
+  if (cnt) cnt.textContent = list.length === state.employees.length
+    ? `${list.length} employees` : `${list.length} of ${state.employees.length} employees`;
   document.querySelectorAll("#view-emp thead th").forEach((th) =>
     th.classList.toggle("sorted", th.dataset.sort === state.empSort.k));
 }
@@ -478,6 +492,7 @@ function initPayControls() {
   $("btnPostRec").addEventListener("click", postRecoveries);
   $("btnExportPay").addEventListener("click", () => { if (payData) downloadCSV(payFileBase() + ".csv", payExportRows()); });
   $("btnExportPayXlsx").addEventListener("click", () => { if (payData) downloadXLSX(payFileBase() + ".xlsx", "Payroll", payExportRows()); });
+  $("btnSlips").addEventListener("click", () => { if (payData) slipsAll(); });
   ["paySearch", "payLoc", "payDesig", "payDate"].forEach((id) => $(id).addEventListener("input", renderPayTable));
   wireSortHeader("#view-pay", state.paySort, renderPayTable);
 }
@@ -536,6 +551,7 @@ function renderPayTable() {
     return `<tr>
       <td><strong>${esc(r.name)}</strong></td><td><span class="chip">${esc(r.desig || "—")}</span></td><td><span class="chip loc">${esc(r.loc || "—")}</span></td>
       <td class="num">${esc(r.salaryDate || "—")}</td>
+      <td>${esc(r.joining || "—")}</td>
       <td class="num">${fmt(r.salary)}</td>
       <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wo || ""}" placeholder="0" data-adj="wo" data-id="${r.id}">` : r.wo}</td>
       <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.lv || ""}" placeholder="0" data-adj="lv" data-id="${r.id}">` : r.lv}</td>
@@ -543,11 +559,12 @@ function renderPayTable() {
       <td class="num">${fmt(r.earned)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
-      <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td></tr>`;
-  }).join("") || `<tr><td colspan="13" class="empty">No employees match.</td></tr>`;
+      <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td>
+      <td><button class="icon-btn" data-slip="${r.id}" title="Salary Slip (Word)">🧾</button></td></tr>`;
+  }).join("") || `<tr><td colspan="15" class="empty">No employees match.</td></tr>`;
   const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
-  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="8">TOTAL — ${rows.length} employees</td>
-    <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td></tr>` : "";
+  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="9">TOTAL — ${rows.length} employees</td>
+    <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td><td></td></tr>` : "";
   markSorted("#view-pay", state.paySort);
 }
 $("payBody").addEventListener("change", async (e) => {
@@ -558,6 +575,7 @@ $("payBody").addEventListener("change", async (e) => {
   catch (err) { toast(err.error, true); }
 });
 $("payBody").addEventListener("click", async (e) => {
+  const sl = e.target.closest("[data-slip]"); if (sl) return slipFor(Number(sl.dataset.slip));
   const b = e.target.closest("[data-unpost]"); if (!b) return;
   const mode = b.dataset.mode;
   if (!confirm(mode === "delete" ? "Delete this recovery? The amount returns to the balance." : "Un-post to edit? The amount returns to the balance.")) return;
@@ -572,16 +590,61 @@ async function postRecoveries() {
 }
 function payExportRows() {
   const bankOf = (id) => state.employees.find((e) => e.id === id) || {};
-  const rows = [["Name","Designation","Loc","Pay Date","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
+  const rows = [["Name","Designation","Loc","Pay Date","Joining","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
     "Bank Name","Account Holder","Account Number","IFSC","UPI"]];
   filteredSortedPayRows().forEach((r) => {
     const b = bankOf(r.id);
-    rows.push([r.name, r.desig, r.loc, r.salaryDate || "", r.salary, r.wo, r.lv, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
+    rows.push([r.name, r.desig, r.loc, r.salaryDate || "", r.joining || "", r.salary, r.wo, r.lv, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
       b.bankName || "", b.accName || "", b.accNo || "", b.ifsc || "", b.upi || ""]);
   });
   return rows;
 }
 function payFileBase() { return `Payroll_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`; }
+
+/* -------- Salary slips (Word) — per employee or bulk, for the shown month -------- */
+function slipLabel() { return `${MONTHS[+$("payMonth").value]} ${$("payYear").value}`; }
+/** Slip body (no letterhead/shell); reused for single + bulk output. */
+function slipBody(r, bank, label) {
+  const info = (l, v) => `<tr><td class="lbl">${l}</td><td>${esc(v || "—")}</td></tr>`;
+  const line = (l1, v1, l2, v2) =>
+    `<tr><td class="lbl">${l1}</td><td style="text-align:right">${v1}</td><td class="lbl">${l2}</td><td style="text-align:right">${v2}</td></tr>`;
+  return `<h2>SALARY SLIP</h2>
+    <p style="text-align:center;margin-top:-8px"><b>${esc(label)}</b></p>
+    <table style="margin-bottom:12px">
+      ${info("Name", r.name)}${info("Designation", r.desig)}${info("Location", r.loc)}
+      ${info("Date of Joining", r.joining)}${info("Salary Date", r.salaryDate)}
+      ${bank.bankName ? info("Bank", `${bank.bankName}${bank.ifsc ? " / " + bank.ifsc : ""}`) : ""}
+    </table>
+    <table>
+      ${line("Base Days", r.bd, "Monthly Salary", fmt(r.salary))}
+      ${line("Week Off (paid)", r.wo, "Earned", fmt(r.earned))}
+      ${line("Leaves", r.lv, "+ Bonus", fmt(r.bonus))}
+      ${line("Work Days", r.wd, "− Other Deductions", fmt(r.ded))}
+      ${line("", "", "− Advance Recovery", fmt(r.rec))}
+      <tr><td class="lbl" style="font-size:14pt">NET PAYABLE</td>
+        <td colspan="3" style="text-align:right;font-weight:bold;font-size:14pt">₹ ${fmt(r.net)}</td></tr>
+    </table>
+    <p style="margin-top:30px;font-size:10pt">This is a system-generated salary slip and does not require a signature.</p>`;
+}
+async function slipFor(id) {
+  const r = (payData && payData.rows || []).find((x) => x.id === id);
+  if (!r) return;
+  const c = await ensureCompany();
+  const bank = state.employees.find((e) => e.id === id) || {};
+  downloadDoc(`SalarySlip_${safe(r.name)}_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`,
+    docWrap(slipBody(r, bank, slipLabel()), c));
+}
+async function slipsAll() {
+  const rows = filteredSortedPayRows();
+  if (!rows.length) return toast("No employees to generate slips for.", true);
+  const c = await ensureCompany();
+  const label = slipLabel();
+  const inner = rows.map((r) => {
+    const bank = state.employees.find((e) => e.id === r.id) || {};
+    return letterhead(c) + slipBody(r, bank, label);
+  }).join('<div style="page-break-before:always"></div>');
+  downloadDoc(`SalarySlips_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`, docShell(inner));
+}
 
 /* -------- Import attendance → Working Days for the selected month --------
    Reads a CSV (Name, Present Days) — e.g. exported from a Petpooja Attendance
@@ -666,7 +729,7 @@ async function loadAdvances() {
   try { state.advances = (await api("/api/advances")).advances; if (!state.employees.length) state.employees = (await api("/api/employees")).employees; fillAdvFilters(); renderAdv(); }
   catch (e) { toast(e.error, true); }
 }
-["advSearch","advStatus","advLoc"].forEach((id) => $(id).addEventListener("input", renderAdv));
+["advSearch","advStatus","advLoc","advMonth"].forEach((id) => $(id).addEventListener("input", renderAdv));
 wireSortHeader("#view-adv", state.advSort, renderAdv);
 function empName(id) { const e = state.employees.find((x) => x.id === id); return e ? e.name : "(deleted)"; }
 function empLocOf(id) { const e = state.employees.find((x) => x.id === id); return e ? e.loc : ""; }
@@ -675,6 +738,7 @@ function fillAdvFilters() {
   const locs = [...new Set(state.employees.map((e) => e.loc).filter(Boolean))].sort();
   s.innerHTML = `<option value="">All Locations</option>` + locs.map((v) => `<option>${esc(v)}</option>`).join("");
   if ([...s.options].some((o) => o.value === cur)) s.value = cur;
+  fillMonthSelect("advMonth", state.advances.map((a) => monthKeyOf(a.date)), "All Months");
 }
 /** Read a sortable value off an advance row for the given column key. */
 function advSortVal(a, k) {
@@ -683,10 +747,11 @@ function advSortVal(a, k) {
   return a[k];
 }
 function renderAdv() {
-  const q = $("advSearch").value.trim().toLowerCase(), st = $("advStatus").value, loc = $("advLoc").value, w = canWrite();
+  const q = $("advSearch").value.trim().toLowerCase(), st = $("advStatus").value, loc = $("advLoc").value, mo = $("advMonth").value, w = canWrite();
   let list = state.advances.filter((a) => {
     if (st === "open" && !a.open) return false; if (st === "closed" && a.open) return false;
     if (loc && empLocOf(a.empId) !== loc) return false;
+    if (mo && monthKeyOf(a.date) !== mo) return false;
     if (q && !(`${empName(a.empId)} ${a.reason}`.toLowerCase().includes(q))) return false; return true;
   });
   list = applySort(list, state.advSort, advSortVal, ["amount", "installment", "recovered", "balance"]);
