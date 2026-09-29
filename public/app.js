@@ -730,6 +730,7 @@ async function loadAdvances() {
   catch (e) { toast(e.error, true); }
 }
 ["advSearch","advStatus","advLoc","advMonth"].forEach((id) => $(id).addEventListener("input", renderAdv));
+$("advGroup").addEventListener("change", renderAdv);
 wireSortHeader("#view-adv", state.advSort, renderAdv);
 function empName(id) { const e = state.employees.find((x) => x.id === id); return e ? e.name : "(deleted)"; }
 function empLocOf(id) { const e = state.employees.find((x) => x.id === id); return e ? e.loc : ""; }
@@ -755,15 +756,38 @@ function renderAdv() {
     if (q && !(`${empName(a.empId)} ${a.reason}`.toLowerCase().includes(q))) return false; return true;
   });
   list = applySort(list, state.advSort, advSortVal, ["amount", "installment", "recovered", "balance"]);
-  $("advBody").innerHTML = list.length ? list.map((a) => `<tr>
+  const advRow = (a) => `<tr>
     <td><strong>${esc(empName(a.empId))}</strong> <span class="chip loc">${esc(empLocOf(a.empId) || "—")}</span></td>
     <td>${esc(a.date || "—")}</td><td class="num">${fmt(a.amount)}</td><td>${esc(a.reason || "—")}</td>
     <td class="num">${a.installment ? fmt(a.installment) : "—"}</td><td class="num">${fmt(a.recovered)}</td>
     <td class="num" style="font-weight:700;color:${a.open ? "var(--brand2)" : "var(--green)"}">${fmt(a.balance)}</td>
     <td><span class="badge ${a.open ? "inactive" : "active"}">${a.open ? "Open" : "Closed"}</span></td>
     <td><div class="rowbtns"><button class="icon-btn" data-ledger="${a.id}" title="Ledger">📒</button>
-      ${w ? `<button class="icon-btn" data-edit="${a.id}" title="Edit">✎</button><button class="icon-btn del" data-del="${a.id}" title="Delete">🗑</button>` : ""}</div></td></tr>`).join("")
-    : `<tr><td colspan="9" class="empty">No advances.</td></tr>`;
+      ${w ? `<button class="icon-btn" data-edit="${a.id}" title="Edit">✎</button><button class="icon-btn del" data-del="${a.id}" title="Delete">🗑</button>` : ""}</div></td></tr>`;
+  const grouped = $("advGroup") ? $("advGroup").checked : true;
+  let html;
+  if (!list.length) {
+    html = `<tr><td colspan="9" class="empty">No advances.</td></tr>`;
+  } else if (!grouped) {
+    html = list.map(advRow).join("");
+  } else {
+    // Group by month of the issue date; groups newest first, undated last.
+    const groups = new Map();
+    for (const a of list) { const k = monthKeyOf(a.date) || "zzz-none"; (groups.get(k) || groups.set(k, []).get(k)).push(a); }
+    const keys = [...groups.keys()].sort().reverse();
+    html = keys.map((k) => {
+      const rows = groups.get(k);
+      const t = rows.reduce((s, a) => ({ amt: s.amt + a.amount, rec: s.rec + a.recovered, bal: s.bal + a.balance }), { amt: 0, rec: 0, bal: 0 });
+      const title = k === "zzz-none" ? "No date" : monthKeyLabel(k);
+      return `<tr class="grp"><td colspan="9" style="background:rgba(255,176,61,.09);font-weight:700;color:var(--brand2)">${esc(title)} — ${rows.length} advance(s)</td></tr>`
+        + rows.map(advRow).join("")
+        + `<tr class="grp-sub"><td colspan="2" style="text-align:right;font-weight:700">Subtotal</td>`
+        + `<td class="num" style="font-weight:700">${fmt(t.amt)}</td><td></td><td></td>`
+        + `<td class="num" style="font-weight:700">${fmt(t.rec)}</td>`
+        + `<td class="num" style="font-weight:700;color:var(--brand2)">${fmt(t.bal)}</td><td></td><td></td></tr>`;
+    }).join("");
+  }
+  $("advBody").innerHTML = html;
   const out = state.advances.reduce((s, a) => s + a.balance, 0);
   document.querySelector("#view-adv .cards").innerHTML = `
     <div class="card"><div class="k">Outstanding</div><div class="v small" style="color:var(--brand2)">${fmt(out)}</div></div>
