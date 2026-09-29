@@ -118,6 +118,9 @@ function uniq(key) { return [...new Set(state.employees.map((e) => e[key]).filte
 // dd.mm.yyyy (also / or -) → "YYYY-MM" month key ("" if unparseable); label "Mon YYYY".
 function monthKeyOf(s) { const m = String(s || "").match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/); return m ? `${m[3]}-${String(+m[2]).padStart(2, "0")}` : ""; }
 function monthKeyLabel(k) { const [y, mo] = k.split("-"); return `${MONTHS[+mo - 1]} ${y}`; }
+// dd.mm.yyyy (also / or -) ↔ yyyy-mm-dd (the value format a <input type=date> wants).
+function dmyToIso(s) { const m = String(s || "").match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/); return m ? `${m[3]}-${String(+m[2]).padStart(2, "0")}-${String(+m[1]).padStart(2, "0")}` : ""; }
+function isoToDmy(s) { const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}.${m[2]}.${m[1]}` : ""; }
 function fillMonthSelect(id, keys, all) {
   const s = $(id), cur = s.value;
   const sorted = [...new Set(keys.filter(Boolean))].sort().reverse(); // newest month first
@@ -187,13 +190,13 @@ $("empBody").addEventListener("click", (e) => {
 $("btnAddEmp").addEventListener("click", () => empModal(null));
 
 const EMP_FIELDS = [
-  ["name","Name *","full"],["desig","Designation"],["loc","Location"],["joining","Joining (dd.mm.yyyy)"],
-  ["leaving","Leaving (dd.mm.yyyy)"],
+  ["name","Name *","full"],["desig","Designation"],["loc","Location"],["joining","Joining","","date"],
+  ["leaving","Leaving","","date"],
   ["salary","Monthly Salary (₹)","","number"],["salaryDate","Salary Date (day, e.g. 5 or 10)"],
   ["phone","Phone"],["status","Status","","status"],
-  ["effectiveFrom","Change Effective From (dd.mm.yyyy)"],
+  ["effectiveFrom","Change Effective From","","date"],
   ["__s1","Report details","sechead"],
-  ["fatherName","Father's Name"],["dob","Date of Birth"],["address","Full Address","full"],
+  ["fatherName","Father's Name"],["dob","Date of Birth (dd.mm.yyyy)"],["address","Full Address","full"],
   ["qualGen","Qualification — General"],["qualTech","Qualification — Technical"],["experience","Experience","full"],
   ["langRead","Read"],["langWrite","Write"],["langSpeak","Speak"],["reportTime","Report Time (A.M.)"],
   ["hobbies","Hobbies","full"],["documents","List of Documents","full"],
@@ -209,7 +212,11 @@ function empModal(id) {
     if (type === "status") return `<div class="fld"><label>Status</label><select id="f_status"><option ${e.status !== "Inactive" ? "selected" : ""}>Active</option><option ${e.status === "Inactive" ? "selected" : ""}>Inactive</option></select></div>`;
     // effectiveFrom isn't stored on the employee — it dates a salary/designation
     // change for the history log; default it to today.
-    const v = k === "effectiveFrom" ? todayStr() : e[k] != null ? esc(e[k]) : "";
+    const raw = k === "effectiveFrom" ? todayStr() : e[k] != null ? String(e[k]) : "";
+    // Date fields use a native calendar picker; the input value is ISO
+    // (yyyy-mm-dd) but the value stored/sent stays dd.mm.yyyy (converted on save).
+    if (type === "date") return `<div class="fld"><label>${esc(label)}</label><input id="f_${k}" type="date" value="${dmyToIso(raw)}"></div>`;
+    const v = esc(raw);
     // accNo is "digits": a text input (not number) so long account numbers keep
     // every digit and are sent as a string — the server validates a digit string.
     const attr = type === "number" ? 'type="number" min="0"' : type === "digits" ? 'inputmode="numeric" autocomplete="off"' : "";
@@ -222,6 +229,7 @@ function empModal(id) {
     const payload = {}; EMP_FIELDS.forEach(([k, , cls, type]) => {
       if (cls === "sechead") return;
       if (type === "status") { payload.status = $("f_status").value; return; }
+      if (type === "date") { payload[k] = isoToDmy($("f_" + k).value); return; }
       payload[k] = type === "number" ? Number($("f_" + k).value || 0) : $("f_" + k).value.trim();
     });
     if (!payload.name.trim()) return toast("Name is required", true);
