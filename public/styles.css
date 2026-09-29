@@ -16,7 +16,7 @@ button{font-family:inherit}
 input,select{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 11px;border-radius:8px;font-size:13px;outline:none;width:100%}
 input:focus,select:focus{border-color:var(--brand)}
 input[type=date]{color-scheme:dark}
-input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.8;cursor:pointer}
+input[type=date]::-webkit-calendar-picker-indicator{opacity:.85;cursor:pointer}
 input[type=date]::-webkit-calendar-picker-indicator:hover{opacity:1}
 
 /* login */
