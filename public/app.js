@@ -27,7 +27,7 @@ async function api(path, opts = {}) {
 
 const state = { user: null, employees: [], advances: [], company: {}, kycCounts: {}, users: [],
   empSort: { k: "name", d: 1 }, empExtra: null, basis: "cal",
-  paySort: { k: null, d: 0 }, advSort: { k: null, d: 0 }, usrSort: { k: null, d: 0 } };
+  paySort: { k: null, d: 0 }, advSort: { k: null, d: 0 }, usrSort: { k: null, d: 0 }, advOpen: new Set() };
 
 /* ---------------- generic table search / sort helpers ---------------- */
 /** Sort a copy of `list` by sort.k (asc/desc via sort.d). `valOf(row,key)` reads
@@ -771,20 +771,26 @@ function renderAdv() {
   } else if (!grouped) {
     html = list.map(advRow).join("");
   } else {
-    // Group by month of the issue date; groups newest first, undated last.
+    // Folder view: one clickable row per issue-date month showing only totals;
+    // click a month to expand its advances. Groups newest first, undated last.
     const groups = new Map();
     for (const a of list) { const k = monthKeyOf(a.date) || "zzz-none"; (groups.get(k) || groups.set(k, []).get(k)).push(a); }
     const keys = [...groups.keys()].sort().reverse();
     html = keys.map((k) => {
       const rows = groups.get(k);
-      const t = rows.reduce((s, a) => ({ amt: s.amt + a.amount, rec: s.rec + a.recovered, bal: s.bal + a.balance }), { amt: 0, rec: 0, bal: 0 });
+      const t = rows.reduce((s, a) => ({ amt: s.amt + a.amount, rec: s.rec + a.recovered, bal: s.bal + a.balance, open: s.open + (a.open ? 1 : 0) }), { amt: 0, rec: 0, bal: 0, open: 0 });
       const title = k === "zzz-none" ? "No date" : monthKeyLabel(k);
-      return `<tr class="grp"><td colspan="9" style="background:rgba(255,176,61,.09);font-weight:700;color:var(--brand2)">${esc(title)} — ${rows.length} advance(s)</td></tr>`
-        + rows.map(advRow).join("")
-        + `<tr class="grp-sub"><td colspan="2" style="text-align:right;font-weight:700">Subtotal</td>`
-        + `<td class="num" style="font-weight:700">${fmt(t.amt)}</td><td></td><td></td>`
-        + `<td class="num" style="font-weight:700">${fmt(t.rec)}</td>`
-        + `<td class="num" style="font-weight:700;color:var(--brand2)">${fmt(t.bal)}</td><td></td><td></td></tr>`;
+      const open = state.advOpen.has(k);
+      const head = `<tr class="grp" data-grp="${esc(k)}" style="cursor:pointer">
+        <td style="background:rgba(255,176,61,.09);font-weight:700;color:var(--brand2)">${open ? "▾" : "▸"} 📁 ${esc(title)}</td>
+        <td style="background:rgba(255,176,61,.09)">${rows.length} advance(s)</td>
+        <td class="num" style="background:rgba(255,176,61,.09);font-weight:700">${fmt(t.amt)}</td>
+        <td style="background:rgba(255,176,61,.09)"></td><td style="background:rgba(255,176,61,.09)"></td>
+        <td class="num" style="background:rgba(255,176,61,.09);font-weight:700">${fmt(t.rec)}</td>
+        <td class="num" style="background:rgba(255,176,61,.09);font-weight:700;color:var(--brand2)">${fmt(t.bal)}</td>
+        <td style="background:rgba(255,176,61,.09)">${t.open} open</td>
+        <td style="background:rgba(255,176,61,.09)"></td></tr>`;
+      return head + (open ? rows.map(advRow).join("") : "");
     }).join("");
   }
   $("advBody").innerHTML = html;
@@ -797,6 +803,8 @@ function renderAdv() {
   markSorted("#view-adv", state.advSort);
 }
 $("advBody").addEventListener("click", (e) => {
+  const g = e.target.closest("[data-grp]");
+  if (g) { const k = g.dataset.grp; state.advOpen.has(k) ? state.advOpen.delete(k) : state.advOpen.add(k); return renderAdv(); }
   const b = e.target.closest("[data-ledger],[data-edit],[data-del]"); if (!b) return;
   if (b.dataset.ledger) ledgerModal(Number(b.dataset.ledger));
   else if (b.dataset.edit) advModal(Number(b.dataset.edit));
