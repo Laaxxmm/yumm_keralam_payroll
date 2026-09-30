@@ -320,7 +320,7 @@ async function reportModal(empId) {
   const c = await ensureCompany();
   $("rBio").addEventListener("click", () => downloadDoc("BioData_" + safe(e.name), bioHtml(e, c)));
   $("rJoin").addEventListener("click", () => downloadDoc("JoiningReport_" + safe(e.name), joinHtml(e, c)));
-  $("rOffer").addEventListener("click", () => downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c)));
+  $("rOffer").addEventListener("click", () => downloadOfferDoc("OfferLetter_" + safe(e.name), offerHtml(e, c)));
   $("rHist").addEventListener("click", () => historyModal(e));
 }
 /** Timeline of salary (CTC) and designation changes for one employee. */
@@ -376,7 +376,8 @@ async function ensureCompany() {
   return state.company;
 }
 /**
- * Company letterhead used by every report (bio-data, joining, offer, history).
+ * Company letterhead used by the text-letterhead reports (bio-data, joining,
+ * history, salary slips). Offer letters use the branded brandedShell() instead.
  * Matches the approved letterhead layout: centred company name + tagline, then
  * address on the left with contact (line 1) and tax IDs (line 2) on the right,
  * closed by a thin rule. Times New Roman, all black.
@@ -446,28 +447,68 @@ function offerBody(e, c) {
     ${S(9, "Confidentiality", "You shall maintain confidentiality regarding the restaurant's recipes, customer information, pricing, business operations, and other confidential information during and after your employment.")}
     ${S(10, "Company Property", "Any uniform, keys, ID card, equipment, or other property provided by the restaurant shall remain the property of the employer and must be returned upon cessation of employment.")}
     ${S(11, "General", "Your employment is governed by the policies of the restaurant and applicable laws. Any false information provided during recruitment may result in termination of employment.")}
-    ${P("If you accept the above terms and conditions, kindly sign and return a copy of this letter.")}
-    ${P("We welcome you to our team and wish you success with us.")}
-    ${P(`For <b>${esc(company)}</b>`)}
+    ${P("<br>If you accept the above terms and conditions, kindly sign and return a copy of this letter.")}
+    ${P("<br>We welcome you to our team and wish you success with us.")}
+    ${P(`<br>For <b>${esc(company)}</b>`)}
     ${P("<br><br>Authorized Signatory")}
-    <h2 style="margin-top:22px">Acceptance</h2>
+    <h2 style="margin-top:22px;font-size:13pt;letter-spacing:3px">ACCEPTANCE</h2>
     ${P(`I, Mr./Ms. <b>${esc(e.name)}</b>, accept the terms and conditions of employment stated above.`)}
     ${P("<br>Employee Signature: ___________________")}
     ${P(`Name: ${esc(e.name)}`)}
     ${P("Date: ___________________")}`;
 }
-function offerHtml(e, c) { return docWrap(offerBody(e, c), c); }
+/*
+ * Branded Yumm Keralam letterhead (offer letters), matching the printed
+ * stationery: orange wave + logo on top, dot triangle + green web-address band
+ * at the bottom. The artwork is a real Word page header/footer (so it repeats
+ * on every page) and bleeds to the page edge via a negative paragraph indent
+ * equal to the side margin. Images ship as MHT parts next to the document.
+ * Artwork: public/letterhead-header.png / letterhead-footer.png (A4 width).
+ */
+const LH_SIDE = "2.4cm";
+const LH_FILES = [["letterhead-header.png", 222], ["letterhead-footer.png", 117]]; // [file, height px at 794 px = 21 cm]
+const b64utf8 = (s) => btoa(unescape(encodeURIComponent(s)));
+let lhImages = null;
+async function letterheadParts() {
+  if (!lhImages) {
+    lhImages = Promise.all(LH_FILES.map(async ([f]) => {
+      const r = await fetch("/" + f, { cache: "no-cache" });
+      if (!r.ok) throw new Error("Letterhead artwork missing: " + f);
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return { loc: "doc_files/" + f, type: "image/png", b64: btoa(bin) };
+    }));
+    lhImages.catch(() => { lhImages = null; }); // allow a retry after a failed fetch
+  }
+  const img = ([f, h]) => `<p style="margin:0 -${LH_SIDE} 0 -${LH_SIDE}"><img width="794" height="${h}" src="${f}"></p>`;
+  const hf = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body>
+    <div style="mso-element:header" id="h1">${img(LH_FILES[0])}</div>
+    <div style="mso-element:footer" id="f1">${img(LH_FILES[1])}</div></body></html>`;
+  return [{ loc: "doc_files/hf.htm", type: 'text/html; charset="utf-8"', b64: b64utf8(hf) }, ...(await lhImages)];
+}
+function brandedShell(inner) {
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8">
+    <style>@page LH{size:21cm 29.7cm;margin:5.6cm ${LH_SIDE} 3.6cm ${LH_SIDE};mso-header-margin:0cm;mso-footer-margin:0cm;mso-header:url("doc_files/hf.htm") h1;mso-footer:url("doc_files/hf.htm") f1}
+    div.LH{page:LH}body{font-family:'Times New Roman',serif;font-size:12pt}table{border-collapse:collapse;width:100%}td{border:1px solid #000;padding:6px 9px}h2{text-align:center;letter-spacing:2px}</style></head>
+    <body><div class="LH">${inner}</div></body></html>`;
+}
+function offerHtml(e, c) { return brandedShell(offerBody(e, c)); }
+/** Download offer letter(s) on the branded letterhead. */
+async function downloadOfferDoc(name, html) {
+  try { downloadDoc(name, html, await letterheadParts()); } catch (err) { toast(err.message || "Could not load letterhead", true); }
+}
 /** One-click offer letter for an employee row (uses already-loaded list data). */
 async function downloadOfferFor(id) {
   const e = state.employees.find((x) => x.id === id);
   if (!e) return toast("Employee not found", true);
   const c = await ensureCompany();
-  downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c));
+  await downloadOfferDoc("OfferLetter_" + safe(e.name), offerHtml(e, c));
 }
-/** One Word file with an offer letter per employee, each on its own page. */
+/** One Word file with an offer letter per employee, each starting on a new page. */
 function offerLettersAllHtml(list, c) {
-  return docShell(list.map((e, i) =>
-    `<div${i < list.length - 1 ? ' style="page-break-after:always"' : ""}>${letterhead(c)}${offerBody(e, c)}</div>`
+  return brandedShell(list.map((e, i) =>
+    `<div${i < list.length - 1 ? ' style="page-break-after:always"' : ""}>${offerBody(e, c)}</div>`
   ).join(""));
 }
 async function downloadAllOfferLetters() {
@@ -475,12 +516,18 @@ async function downloadAllOfferLetters() {
   if (!list.length) return toast("No employees to generate", true);
   if (!confirm(`Generate offer letters for ${list.length} employee(s) into one Word file?`)) return;
   const c = await ensureCompany();
-  downloadDoc("Offer_Letters_All", offerLettersAllHtml(list, c));
+  await downloadOfferDoc("Offer_Letters_All", offerLettersAllHtml(list, c));
 }
-function downloadDoc(name, html) {
+/** Word-openable MHT. `parts` (optional) are extra files (header/footer, images)
+ *  resolved relative to the main document, e.g. { loc:"doc_files/x.png", type, b64 }. */
+function downloadDoc(name, html, parts = []) {
   const bnd = "----=_YHR";
-  const mht = ["MIME-Version: 1.0", `Content-Type: multipart/related; boundary="${bnd}"`, "", "--" + bnd,
-    'Content-Type: text/html; charset="utf-8"', "Content-Transfer-Encoding: base64", "", btoa(unescape(encodeURIComponent(html))).replace(/(.{76})/g, "$1\r\n"), "--" + bnd + "--", ""].join("\r\n");
+  const wrap = (s) => s.replace(/(.{76})/g, "$1\r\n");
+  const part = (type, loc, b64) => ["--" + bnd, "Content-Type: " + type, "Content-Transfer-Encoding: base64",
+    ...(loc ? ["Content-Location: file:///C:/" + loc] : []), "", wrap(b64)];
+  const mht = ["MIME-Version: 1.0", `Content-Type: multipart/related; boundary="${bnd}"`, "",
+    ...part('text/html; charset="utf-8"', parts.length ? "doc.htm" : "", b64utf8(html)),
+    ...parts.flatMap((p) => part(p.type, p.loc, p.b64)), "--" + bnd + "--", ""].join("\r\n");
   const u = URL.createObjectURL(new Blob([mht], { type: "application/msword" }));
   const a = document.createElement("a"); a.href = u; a.download = name + ".doc"; a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
   toast("Downloaded");
