@@ -320,7 +320,7 @@ async function reportModal(empId) {
   const c = await ensureCompany();
   $("rBio").addEventListener("click", () => downloadDoc("BioData_" + safe(e.name), bioHtml(e, c)));
   $("rJoin").addEventListener("click", () => downloadDoc("JoiningReport_" + safe(e.name), joinHtml(e, c)));
-  $("rOffer").addEventListener("click", () => downloadOfferDoc("OfferLetter_" + safe(e.name), offerHtml(e, c)));
+  $("rOffer").addEventListener("click", () => downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c)));
   $("rHist").addEventListener("click", () => historyModal(e));
 }
 /** Timeline of salary (CTC) and designation changes for one employee. */
@@ -375,36 +375,18 @@ async function ensureCompany() {
   }
   return state.company;
 }
-/**
- * Company letterhead used by the text-letterhead reports (bio-data, joining,
- * history, salary slips). Offer letters use the branded brandedShell() instead.
- * Matches the approved letterhead layout: centred company name + tagline, then
- * address on the left with contact (line 1) and tax IDs (line 2) on the right,
- * closed by a thin rule. Times New Roman, all black.
- */
-function letterhead(c) {
-  const addr1 = esc(c.addr1 || "");
-  const place = esc([c.addr2, [c.city, c.state].filter(Boolean).join(", ")].filter(Boolean).join(", ") +
-    (c.pincode ? " – " + c.pincode : ""));
-  const contact = [c.mobile ? "Mobile: " + esc(c.mobile) : "", c.email ? "Email: " + esc(c.email) : ""].filter(Boolean).join("; ");
-  const tax = [c.gstin ? "GSTIN: " + esc(c.gstin) : "", c.pan ? "PAN: " + esc(c.pan) : ""].filter(Boolean).join(" | ");
-  const cell = 'style="border:none;padding:0 0 1px;vertical-align:top"';
-  return `<table style="width:100%;border-collapse:collapse;border:none;margin-bottom:2px">
-    <tr><td colspan="2" style="border:none;padding:0;text-align:center"><b style="font-size:22pt;color:#000">${esc(c.name || "")}</b></td></tr>
-    ${c.tagline ? `<tr><td colspan="2" style="border:none;padding:0 0 4px;text-align:center"><b style="font-size:9pt;letter-spacing:1.5pt;color:#000">${esc(c.tagline)}</b></td></tr>` : `<tr><td colspan="2" style="border:none;height:6pt"></td></tr>`}
-    <tr><td ${cell} align="left"><b style="font-size:9pt">${addr1}</b></td><td ${cell} align="right"><b style="font-size:8pt">${contact}</b></td></tr>
-    <tr><td ${cell} align="left"><b style="font-size:9pt">${place}</b></td><td ${cell} align="right"><b style="font-size:8pt">${tax}</b></td></tr>
-  </table><hr style="border:none;border-top:1.2px solid #000;margin:1px 0 14px">`;
-}
+/** Every Word report (bio-data, joining, offer, history, salary slips) uses the
+ *  branded letterhead as its page header/footer — see letterheadParts(). */
 function docShell(bodyInner) {
   return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8">
-    <style>@page{margin:2cm}body{font-family:'Times New Roman',serif;font-size:13pt}table{border-collapse:collapse;width:100%}td{border:1px solid #000;padding:6px 9px}h2{text-align:center;letter-spacing:2px}.lbl{width:40%;font-weight:bold}</style></head>
-    <body>${bodyInner}</body></html>`;
+    <style>@page LH{size:21cm 29.7cm;margin:5.6cm ${LH_SIDE} 3.6cm ${LH_SIDE};mso-header-margin:0cm;mso-footer-margin:0cm;mso-header:url("doc_files/hf.htm") h1;mso-footer:url("doc_files/hf.htm") f1}
+    div.LH{page:LH}body{font-family:'Times New Roman',serif;font-size:12pt}table{border-collapse:collapse;width:100%}td{border:1px solid #000;padding:6px 9px}h2{text-align:center;letter-spacing:2px}.lbl{width:40%;font-weight:bold}</style></head>
+    <body><div class="LH">${bodyInner}</div></body></html>`;
 }
-function docWrap(inner, c) { return docShell(`${letterhead(c)}${inner}`); }
+function docWrap(inner, _c) { return docShell(inner); }
 function bioHtml(e, c) {
   const row = (l, v) => `<tr><td class="lbl">${l}</td><td>${esc(v || "")}</td></tr>`;
-  return docWrap(`<p>To,</p><p>&nbsp;</p><p>Respected Sir,</p>
+  return docWrap(`<p>To,</p><p>Respected Sir,</p>
     <p><b>SUB: APPLICATION FOR THE POST OF ${esc((e.desig || "").toUpperCase())}</b></p>
     <p>I offer myself as a candidate for a suitable job and furnish the following Bio-data for your consideration.</p>
     <h2>BIO-DATA</h2><table>
@@ -412,8 +394,8 @@ function bioHtml(e, c) {
     ${row("Date Of Birth", e.dob)}${row("Qualification (General / Technical)", (e.qualGen || "") + " / " + (e.qualTech || ""))}
     ${row("Experience", e.experience)}${row("Languages (R/W/S)", [e.langRead, e.langWrite, e.langSpeak].filter(Boolean).join(" / "))}
     ${row("Hobbies", e.hobbies)}${row("Date Of Joining", e.joining)}${row("List of Documents", e.documents)}</table>
-    <p>Kindly consider my application sympathetically.</p><p>Thanking you,</p>
-    <p style="margin-top:26px">Yours faithfully,</p><p><b>${esc(e.name)}</b></p>`, c);
+    <p>Kindly consider my application sympathetically. Thanking you,</p>
+    <p style="margin-top:14px">Yours faithfully,</p><p><b>${esc(e.name)}</b></p>`, c);
 }
 function joinHtml(e, c) {
   const org = c.name || "the Company", place = [c.name, c.city].filter(Boolean).join(", ");
@@ -458,7 +440,7 @@ function offerBody(e, c) {
     ${P("Date: ___________________")}`;
 }
 /*
- * Branded Yumm Keralam letterhead (offer letters), matching the printed
+ * Branded Yumm Keralam letterhead (all Word reports), matching the printed
  * stationery: orange wave + logo on top, dot triangle + green web-address band
  * at the bottom. The artwork is a real Word page header/footer (so it repeats
  * on every page) and bleeds to the page edge via a negative paragraph indent
@@ -487,27 +469,17 @@ async function letterheadParts() {
     <div style="mso-element:footer" id="f1">${img(LH_FILES[1])}</div></body></html>`;
   return [{ loc: "doc_files/hf.htm", type: 'text/html; charset="utf-8"', b64: b64utf8(hf) }, ...(await lhImages)];
 }
-function brandedShell(inner) {
-  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8">
-    <style>@page LH{size:21cm 29.7cm;margin:5.6cm ${LH_SIDE} 3.6cm ${LH_SIDE};mso-header-margin:0cm;mso-footer-margin:0cm;mso-header:url("doc_files/hf.htm") h1;mso-footer:url("doc_files/hf.htm") f1}
-    div.LH{page:LH}body{font-family:'Times New Roman',serif;font-size:12pt}table{border-collapse:collapse;width:100%}td{border:1px solid #000;padding:6px 9px}h2{text-align:center;letter-spacing:2px}</style></head>
-    <body><div class="LH">${inner}</div></body></html>`;
-}
-function offerHtml(e, c) { return brandedShell(offerBody(e, c)); }
-/** Download offer letter(s) on the branded letterhead. */
-async function downloadOfferDoc(name, html) {
-  try { downloadDoc(name, html, await letterheadParts()); } catch (err) { toast(err.message || "Could not load letterhead", true); }
-}
+function offerHtml(e, c) { return docWrap(offerBody(e, c), c); }
 /** One-click offer letter for an employee row (uses already-loaded list data). */
 async function downloadOfferFor(id) {
   const e = state.employees.find((x) => x.id === id);
   if (!e) return toast("Employee not found", true);
   const c = await ensureCompany();
-  await downloadOfferDoc("OfferLetter_" + safe(e.name), offerHtml(e, c));
+  await downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c));
 }
 /** One Word file with an offer letter per employee, each starting on a new page. */
 function offerLettersAllHtml(list, c) {
-  return brandedShell(list.map((e, i) =>
+  return docShell(list.map((e, i) =>
     `<div${i < list.length - 1 ? ' style="page-break-after:always"' : ""}>${offerBody(e, c)}</div>`
   ).join(""));
 }
@@ -516,17 +488,19 @@ async function downloadAllOfferLetters() {
   if (!list.length) return toast("No employees to generate", true);
   if (!confirm(`Generate offer letters for ${list.length} employee(s) into one Word file?`)) return;
   const c = await ensureCompany();
-  await downloadOfferDoc("Offer_Letters_All", offerLettersAllHtml(list, c));
+  await downloadDoc("Offer_Letters_All", offerLettersAllHtml(list, c));
 }
-/** Word-openable MHT. `parts` (optional) are extra files (header/footer, images)
- *  resolved relative to the main document, e.g. { loc:"doc_files/x.png", type, b64 }. */
-function downloadDoc(name, html, parts = []) {
+/** Word-openable MHT: the document plus the letterhead header/footer file and
+ *  images as parts resolved relative to it ({ loc:"doc_files/x.png", type, b64 }). */
+async function downloadDoc(name, html) {
+  let parts;
+  try { parts = await letterheadParts(); } catch (err) { return toast(err.message || "Could not load letterhead", true); }
   const bnd = "----=_YHR";
   const wrap = (s) => s.replace(/(.{76})/g, "$1\r\n");
   const part = (type, loc, b64) => ["--" + bnd, "Content-Type: " + type, "Content-Transfer-Encoding: base64",
     ...(loc ? ["Content-Location: file:///C:/" + loc] : []), "", wrap(b64)];
   const mht = ["MIME-Version: 1.0", `Content-Type: multipart/related; boundary="${bnd}"`, "",
-    ...part('text/html; charset="utf-8"', parts.length ? "doc.htm" : "", b64utf8(html)),
+    ...part('text/html; charset="utf-8"', "doc.htm", b64utf8(html)),
     ...parts.flatMap((p) => part(p.type, p.loc, p.b64)), "--" + bnd + "--", ""].join("\r\n");
   const u = URL.createObjectURL(new Blob([mht], { type: "application/msword" }));
   const a = document.createElement("a"); a.href = u; a.download = name + ".doc"; a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
@@ -692,11 +666,10 @@ async function slipFor(id) {
 async function slipsAll() {
   const rows = filteredSortedPayRows();
   if (!rows.length) return toast("No employees to generate slips for.", true);
-  const c = await ensureCompany();
   const label = slipLabel();
   const inner = rows.map((r) => {
     const bank = state.employees.find((e) => e.id === r.id) || {};
-    return letterhead(c) + slipBody(r, bank, label);
+    return slipBody(r, bank, label);
   }).join('<div style="page-break-before:always"></div>');
   downloadDoc(`SalarySlips_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`, docShell(inner));
 }
