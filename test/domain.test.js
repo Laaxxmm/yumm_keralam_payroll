@@ -212,3 +212,39 @@ test("clearing a recovery override (null) reverts to scheduled — null is not c
   assert.equal(r.advOverride, null);            // override actually cleared
   assert.equal(r.rec, 1000);                    // and recovery is back to scheduled
 });
+
+test("auto week off: 4 a month, pro-rated + joining/leaving pro-rate pay", async () => {
+  const mk = "2026-8"; // September 2026, 30 days
+  const mkEmp = async (body) => (await (await api("/api/employees", { method: "POST", body: JSON.stringify({ salary: 30000, status: "Active", ...body }) })).json()).id;
+  const full = await mkEmp({ name: "WO Full", joining: "01.01.2026" });
+  const mid = await mkEmp({ name: "WO Joiner", joining: "16.09.2026" });
+  const left = await mkEmp({ name: "WO Leaver", joining: "01.01.2026", leaving: "10.09.2026" });
+  const get = async (id, m = mk) => (await (await api(`/api/payroll/${m}?basis=cal`)).json()).rows.find((r) => r.id === id);
+
+  let r = await get(full);
+  assert.deepEqual([r.wo, r.woSet, r.wd, r.earned], [4, false, 26, 30000]); // week off paid
+
+  r = await get(mid);                       // employed 16–30 Sept = 15 days
+  assert.deepEqual([r.availDays, r.wo, r.wd, r.earned], [15, 2, 13, 15000]);
+
+  r = await get(left);                      // employed 1–10 Sept = 10 days
+  assert.deepEqual([r.availDays, r.wo, r.wd, r.earned], [10, 1, 9, 10000]);
+
+  // Leaves still reduce pay on top of the pro-ration
+  await api(`/api/payroll/${mk}/${mid}`, { method: "PUT", body: JSON.stringify({ lv: 3 }) });
+  r = await get(mid);
+  assert.deepEqual([r.wo, r.wd, r.earned], [2, 10, 12000]);
+
+  // A typed week off (even 0) wins; clearing it (null) returns to automatic
+  await api(`/api/payroll/${mk}/${full}`, { method: "PUT", body: JSON.stringify({ wo: 0 }) });
+  r = await get(full);
+  assert.deepEqual([r.wo, r.woSet, r.wd], [0, true, 30]);
+  await api(`/api/payroll/${mk}/${full}`, { method: "PUT", body: JSON.stringify({ wo: null }) });
+  r = await get(full);
+  assert.deepEqual([r.wo, r.woSet, r.wd], [4, false, 26]);
+
+  // Applies to every month: July 2026 (31 days), joined 16th → 16 days employed
+  const julyJoiner = await mkEmp({ name: "WO July", joining: "16.07.2026" });
+  r = await get(julyJoiner, "2026-6");
+  assert.deepEqual([r.availDays, r.wo, r.wd, r.earned], [16, 2, 14, 15484]);
+});

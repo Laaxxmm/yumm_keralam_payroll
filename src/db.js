@@ -227,6 +227,13 @@ function migrate(d) {
   if (!hasCol("payroll_adjust", "lv")) {
     d.exec("ALTER TABLE payroll_adjust ADD COLUMN lv REAL NOT NULL DEFAULT 0");
   }
+  // wo_set = 1 when week off was typed by a user; 0 = use the automatic
+  // 4/month (pro-rated). `wo` is NOT NULL so it can't carry "unset" itself.
+  // One-time, with the column: a non-zero week off already saved was typed, so keep it.
+  if (!hasCol("payroll_adjust", "wo_set")) {
+    d.exec("ALTER TABLE payroll_adjust ADD COLUMN wo_set INTEGER NOT NULL DEFAULT 0");
+    d.exec("UPDATE payroll_adjust SET wo_set = 1 WHERE wo > 0");
+  }
 }
 
 /** Write an audit entry. Never throws — auditing must not break a request. */

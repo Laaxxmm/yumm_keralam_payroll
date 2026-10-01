@@ -568,7 +568,7 @@ function filteredSortedPayRows() {
 function renderPayTable() {
   if (!payData) return;
   const w = canWrite();
-  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (base − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = base − Week Off − Leaves. Salary is as it was that month.`;
+  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type to override). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. Salary is as it was that month.`;
   $("recBanner").innerHTML = payData.pending && w
     ? `<div style="background:rgba(255,176,61,.1);border:1px solid #4a3a20;color:var(--brand2);padding:9px 13px;border-radius:8px;margin-bottom:12px">⚠ ${payData.pending} recovery(ies) not yet posted. <button class="btn sm" id="bannerPost">Post Recoveries</button></div>` : "";
   if ($("bannerPost")) $("bannerPost").addEventListener("click", postRecoveries);
@@ -582,9 +582,9 @@ function renderPayTable() {
       <td class="num">${esc(r.salaryDate || "—")}</td>
       <td>${esc(r.joining || "—")}</td>
       <td class="num">${fmt(r.salary)}</td>
-      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wo || ""}" placeholder="0" data-adj="wo" data-id="${r.id}">` : r.wo}</td>
+      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.woSet ? r.wo : ""}" placeholder="${r.wo}" data-adj="wo" data-id="${r.id}" title="${r.woSet ? "Typed week off. Clear the box to go back to automatic (" + r.woAuto + ")." : "Automatic: " + r.woAuto + " (4 per month, pro-rated for joining/leaving). Type to override."}">` : r.wo}</td>
       <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.lv || ""}" placeholder="0" data-adj="lv" data-id="${r.id}">` : r.lv}</td>
-      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wd}" data-adj="wd" data-id="${r.id}" title="Base ${r.bd} − week off − leaves. Type to override.">` : r.wd}</td>
+      <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wd}" data-adj="wd" data-id="${r.id}" title="${r.availDays !== r.bd ? `Payable days ${r.availDays} (joined/left mid-month; base ${r.bd})` : `Base ${r.bd}`} − week off − leaves. Type to override.">` : r.wd}</td>
       <td class="num">${fmt(r.earned)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
@@ -599,7 +599,7 @@ function renderPayTable() {
 $("payBody").addEventListener("change", async (e) => {
   const inp = e.target.closest("[data-adj]"); if (!inp) return;
   const field = inp.dataset.adj, id = Number(inp.dataset.id);
-  const val = inp.value === "" ? (field === "wd" || field === "adv" ? null : 0) : Math.max(0, Number(inp.value));
+  const val = inp.value === "" ? (field === "wd" || field === "adv" || field === "wo" ? null : 0) : Math.max(0, Number(inp.value));
   try { await api(`/api/payroll/${mk()}/${id}`, { method: "PUT", body: { [field]: val } }); renderPayroll(); }
   catch (err) { toast(err.error, true); }
 });

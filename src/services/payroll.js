@@ -101,18 +101,37 @@ export function recoveryFor(empId, mk) {
   return schedRecovery(empId, mk);
 }
 
+/** Automatic week off per full month (paid), pro-rated for mid-month joiners/leavers. */
+export const WEEK_OFF_PER_MONTH = 4;
+/** Calendar days of the month the employee was on the rolls (joining..leaving, inclusive). */
+export function employedDays(emp, mk) {
+  const { start, end } = monthRangeIso(mk);
+  const j = dmyToIso(emp.joining), l = dmyToIso(emp.leaving);
+  const from = j && j > start ? j : start;
+  const to = l && l < end ? l : end;
+  if (from > to) return 0;
+  return Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
+}
+const half = (x) => Math.round(x * 2) / 2;
+
 export function computeRow(emp, mk, basis) {
   const bd = baseDaysFor(mk, basis);
   const adj = getAdjust(mk, emp.id);
-  const wo = adj ? (adj.wo || 0) : 0;   // week off days (paid)
+  // Share of the month the employee was employed (joined / left mid-month).
+  const frac = employedDays(emp, mk) / daysInMonth(mk);
+  const avail = frac === 1 ? bd : half(bd * frac);       // payable base days this month
+  const woSet = !!(adj && adj.wo_set);
+  // Week off (paid): a typed value wins; otherwise 4 per month, pro-rated.
+  const woAuto = Math.round(WEEK_OFF_PER_MONTH * frac);
+  const wo = woSet ? adj.wo || 0 : woAuto;
   const lv = adj ? (adj.lv || 0) : 0;   // leave days (unpaid)
   const override = adj && adj.wd != null;
-  // Work Days shown = base days − week off − leaves (actual days worked), unless
+  // Work Days shown = payable days − week off − leaves (actual days worked), unless
   // a direct wd override is set (e.g. attendance import = present days).
-  const wd = override ? adj.wd : Math.max(0, bd - wo - lv);
-  // Pay: week off is PAID, so only leaves reduce it — paid days = base − leaves.
+  const wd = override ? adj.wd : Math.max(0, avail - wo - lv);
+  // Pay: week off is PAID, so only leaves reduce it — paid days = payable days − leaves.
   // With a direct override, pay follows the override (present days).
-  const paidDays = override ? adj.wd : Math.max(0, bd - lv);
+  const paidDays = override ? adj.wd : Math.max(0, avail - lv);
   const bonus = adj ? adj.bonus : 0;
   const ded = adj ? adj.ded : 0;
   // Pay the month with the salary/designation that was in force THAT month —
@@ -126,6 +145,7 @@ export function computeRow(emp, mk, basis) {
   return {
     id: emp.id, name: emp.name, desig, loc: emp.loc, salary, salaryDate: emp.salary_date || "", joining: emp.joining || "",
     wd, wo, lv, bd, earned, bonus, ded, rec, net,
+    woSet, woAuto, availDays: avail,
     wdOverride: adj ? adj.wd : null,
     advPosted: !!(adj && adj.adv_posted), advOverride: adj ? adj.adv : null,
   };

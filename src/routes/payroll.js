@@ -61,7 +61,7 @@ router.get("/:mk", (req, res) => {
 const AdjustSchema = z.object({
   // Working days may be fractional (a half-day worked = 0.5), e.g. from attendance.
   wd: z.coerce.number().min(0).max(366).nullable().optional(),
-  wo: z.coerce.number().min(0).max(366).optional(),   // week off days
+  wo: z.coerce.number().min(0).max(366).nullable().optional(),   // week off days; null = automatic
   lv: z.coerce.number().min(0).max(366).optional(),   // leave days
   bonus: z.coerce.number().int().min(0).max(100_000_000).optional(),
   ded: z.coerce.number().int().min(0).max(100_000_000).optional(),
@@ -79,16 +79,19 @@ router.put("/:mk/:empId", requireRole("admin", "hr"), (req, res) => {
   // any direct wd override unless wd is explicitly given in the same request.
   const woLvGiven = "wo" in parsed.data || "lv" in parsed.data;
   const wd = "wd" in parsed.data ? parsed.data.wd : (woLvGiven ? null : cur.wd ?? null);
-  const wo = "wo" in parsed.data ? parsed.data.wo : cur.wo ?? 0;
+  // Week off: a number is a typed value (wo_set=1); null reverts to automatic.
+  const woGiven = "wo" in parsed.data;
+  const wo = woGiven ? (parsed.data.wo ?? 0) : cur.wo ?? 0;
+  const woSet = woGiven ? (parsed.data.wo == null ? 0 : 1) : cur.wo_set ?? 0;
   const lv = "lv" in parsed.data ? parsed.data.lv : cur.lv ?? 0;
   const bonus = "bonus" in parsed.data ? parsed.data.bonus : cur.bonus ?? 0;
   const ded = "ded" in parsed.data ? parsed.data.ded : cur.ded ?? 0;
   const adv = "adv" in parsed.data ? parsed.data.adv : cur.adv ?? null;
   getDb().prepare(
-    `INSERT INTO payroll_adjust (mk, emp_id, wd, wo, lv, bonus, ded, adv, adv_posted)
-       VALUES (?,?,?,?,?,?,?,?, COALESCE((SELECT adv_posted FROM payroll_adjust WHERE mk=? AND emp_id=?),0))
-     ON CONFLICT(mk, emp_id) DO UPDATE SET wd=excluded.wd, wo=excluded.wo, lv=excluded.lv, bonus=excluded.bonus, ded=excluded.ded, adv=excluded.adv`
-  ).run(mk, empId, wd, wo, lv, bonus, ded, adv, mk, empId);
+    `INSERT INTO payroll_adjust (mk, emp_id, wd, wo, wo_set, lv, bonus, ded, adv, adv_posted)
+       VALUES (?,?,?,?,?,?,?,?,?, COALESCE((SELECT adv_posted FROM payroll_adjust WHERE mk=? AND emp_id=?),0))
+     ON CONFLICT(mk, emp_id) DO UPDATE SET wd=excluded.wd, wo=excluded.wo, wo_set=excluded.wo_set, lv=excluded.lv, bonus=excluded.bonus, ded=excluded.ded, adv=excluded.adv`
+  ).run(mk, empId, wd, wo, woSet, lv, bonus, ded, adv, mk, empId);
   res.json({ ok: true });
 });
 
