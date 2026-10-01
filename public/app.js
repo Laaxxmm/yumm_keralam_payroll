@@ -775,15 +775,22 @@ function advSortVal(a, k) {
   if (k === "status") return a.open ? "Open" : "Closed";
   return a[k];
 }
-function renderAdv() {
-  const q = $("advSearch").value.trim().toLowerCase(), st = $("advStatus").value, loc = $("advLoc").value, mo = $("advMonth").value, w = canWrite();
-  let list = state.advances.filter((a) => {
+/** Month keys newest first, with the "zzz-none" (undated) bucket last. */
+const advMonthDesc = (a, b) => (a === "zzz-none") - (b === "zzz-none") || b.localeCompare(a);
+/** Advances matching the toolbar filters (search, status, location, month), in the table's sort order. */
+function filteredAdv() {
+  const q = $("advSearch").value.trim().toLowerCase(), st = $("advStatus").value, loc = $("advLoc").value, mo = $("advMonth").value;
+  const list = state.advances.filter((a) => {
     if (st === "open" && !a.open) return false; if (st === "closed" && a.open) return false;
     if (loc && empLocOf(a.empId) !== loc) return false;
     if (mo && monthKeyOf(a.date) !== mo) return false;
     if (q && !(`${empName(a.empId)} ${a.reason}`.toLowerCase().includes(q))) return false; return true;
   });
-  list = applySort(list, state.advSort, advSortVal, ["amount", "installment", "recovered", "balance"]);
+  return applySort(list, state.advSort, advSortVal, ["amount", "installment", "recovered", "balance"]);
+}
+function renderAdv() {
+  const w = canWrite();
+  const list = filteredAdv();
   const advRow = (a) => `<tr>
     <td><strong>${esc(empName(a.empId))}</strong> <span class="chip loc">${esc(empLocOf(a.empId) || "—")}</span></td>
     <td>${esc(a.date || "—")}</td><td class="num">${fmt(a.amount)}</td><td>${esc(a.reason || "—")}</td>
@@ -803,7 +810,7 @@ function renderAdv() {
     // click a month to expand its advances. Groups newest first, undated last.
     const groups = new Map();
     for (const a of list) { const k = monthKeyOf(a.date) || "zzz-none"; (groups.get(k) || groups.set(k, []).get(k)).push(a); }
-    const keys = [...groups.keys()].sort().reverse();
+    const keys = [...groups.keys()].sort(advMonthDesc);
     html = keys.map((k) => {
       const rows = groups.get(k);
       const t = rows.reduce((s, a) => ({ amt: s.amt + a.amount, rec: s.rec + a.recovered, bal: s.bal + a.balance, open: s.open + (a.open ? 1 : 0) }), { amt: 0, rec: 0, bal: 0, open: 0 });
@@ -817,7 +824,7 @@ function renderAdv() {
         <td class="num" style="background:rgba(255,176,61,.09);font-weight:700">${fmt(t.rec)}</td>
         <td class="num" style="background:rgba(255,176,61,.09);font-weight:700;color:var(--brand2)">${fmt(t.bal)}</td>
         <td style="background:rgba(255,176,61,.09)">${t.open} open</td>
-        <td style="background:rgba(255,176,61,.09)"></td></tr>`;
+        <td style="background:rgba(255,176,61,.09)"><div class="rowbtns"><button class="icon-btn" data-grpxlsx="${esc(k)}" title="Download ${esc(title)} (Excel)">⬇</button></div></td></tr>`;
       return head + (open ? rows.map(advRow).join("") : "");
     }).join("");
   }
@@ -831,6 +838,13 @@ function renderAdv() {
   markSorted("#view-adv", state.advSort);
 }
 $("advBody").addEventListener("click", (e) => {
+  const dl = e.target.closest("[data-grpxlsx]");
+  if (dl) { // month-folder download: that month's advances (other filters still apply); doesn't toggle the folder
+    const k = dl.dataset.grpxlsx;
+    const rows = filteredAdv().filter((a) => (monthKeyOf(a.date) || "zzz-none") === k);
+    const label = k === "zzz-none" ? "No date" : monthKeyLabel(k);
+    return downloadXLSX(`Advances_${safe(label)}.xlsx`, label, advExportRows(rows));
+  }
   const g = e.target.closest("[data-grp]");
   if (g) { const k = g.dataset.grp; state.advOpen.has(k) ? state.advOpen.delete(k) : state.advOpen.add(k); return renderAdv(); }
   const b = e.target.closest("[data-ledger],[data-edit],[data-del]"); if (!b) return;
@@ -838,13 +852,23 @@ $("advBody").addEventListener("click", (e) => {
   else if (b.dataset.edit) advModal(Number(b.dataset.edit));
   else if (b.dataset.del) delAdv(Number(b.dataset.del));
 });
-function advExportRows() {
-  const rows = [["Employee","Location","Date","Amount","Reason","Installment/mo","Recovered","Balance","Status"]];
-  state.advances.forEach((a) => rows.push([empName(a.empId), empLocOf(a.empId), a.date, a.amount, a.reason, a.installment, a.recovered, a.balance, a.open ? "Open" : "Closed"]));
+/** Export rows for the given advances (default: what the filters show), month-wise, with a total row. */
+function advExportRows(list = filteredAdv()) {
+  const mOf = (a) => monthKeyOf(a.date) || "zzz-none";
+  const sorted = [...list].sort((x, y) => advMonthDesc(mOf(x), mOf(y))); // stable: keeps table order inside a month
+  const rows = [["Month","Employee","Location","Date","Amount","Reason","Installment/mo","Recovered","Balance","Status"]];
+  const t = { amt: 0, rec: 0, bal: 0 };
+  sorted.forEach((a) => {
+    rows.push([mOf(a) === "zzz-none" ? "No date" : monthKeyLabel(mOf(a)), empName(a.empId), empLocOf(a.empId), a.date, a.amount, a.reason, a.installment, a.recovered, a.balance, a.open ? "Open" : "Closed"]);
+    t.amt += a.amount; t.rec += a.recovered; t.bal += a.balance;
+  });
+  rows.push(["TOTAL", `${sorted.length} advance(s)`, "", "", t.amt, "", "", t.rec, t.bal, ""]);
   return rows;
 }
-$("btnExportAdv").addEventListener("click", () => downloadCSV("Advances.csv", advExportRows()));
-$("btnExportAdvXlsx").addEventListener("click", () => downloadXLSX("Advances.xlsx", "Advances", advExportRows()));
+/** File name reflecting the month filter, e.g. Advances_September_2026. */
+function advFileBase() { const mo = $("advMonth").value; return mo ? `Advances_${safe(monthKeyLabel(mo))}` : "Advances"; }
+$("btnExportAdv").addEventListener("click", () => downloadCSV(advFileBase() + ".csv", advExportRows()));
+$("btnExportAdvXlsx").addEventListener("click", () => downloadXLSX(advFileBase() + ".xlsx", "Advances", advExportRows()));
 $("btnAddAdv").addEventListener("click", () => advModal(null));
 function advModal(id) {
   const a = id ? state.advances.find((x) => x.id === id) : {};
