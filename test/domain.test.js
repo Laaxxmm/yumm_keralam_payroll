@@ -248,3 +248,33 @@ test("auto week off: 4 a month, pro-rated + joining/leaving pro-rate pay", async
   r = await get(julyJoiner, "2026-6");
   assert.deepEqual([r.availDays, r.wo, r.wd, r.earned], [16, 2, 14, 15484]);
 });
+
+test("employee ID (Petpooja ID): blank by default, editable, unique, set via emp-code", async () => {
+  const mk = async (body) => (await api("/api/employees", { method: "POST", body: JSON.stringify({ salary: 1000, status: "Active", ...body }) }));
+  const get = async (id) => (await (await api("/api/employees/" + id)).json()).employee;
+  const setCode = (id, empCode) => api(`/api/employees/${id}/emp-code`, { method: "PUT", body: JSON.stringify({ empCode }) });
+
+  const a = (await (await mk({ name: "PID A" })).json()).id;
+  const b = (await (await mk({ name: "PID B" })).json()).id;
+  assert.equal((await get(a)).empCode, "");                    // nothing invented
+
+  // The attendance import saves the Petpooja ID; leading zeros are kept
+  assert.equal((await setCode(a, "098")).status, 200);
+  assert.equal((await get(a)).empCode, "098");
+
+  // Duplicates are rejected — via emp-code, full edit and create
+  let r = await setCode(b, "098");
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /already used by PID A/);
+  r = await api("/api/employees/" + b, { method: "PUT", body: JSON.stringify({ ...(await get(b)), empCode: "098" }) });
+  assert.equal(r.status, 400);
+  assert.equal((await mk({ name: "PID Dup", empCode: "098" })).status, 400);
+
+  // Editable by hand in the form, and can be cleared; two blanks never clash
+  r = await api("/api/employees/" + b, { method: "PUT", body: JSON.stringify({ ...(await get(b)), empCode: "200" }) });
+  assert.equal(r.status, 200);
+  assert.equal((await get(b)).empCode, "200");
+  assert.equal((await setCode(a, "")).status, 200);
+  assert.equal((await setCode(b, "")).status, 200);
+  assert.equal((await setCode(a, "bad id!")).status, 400);
+});

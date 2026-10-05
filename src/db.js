@@ -234,6 +234,12 @@ function migrate(d) {
     d.exec("ALTER TABLE payroll_adjust ADD COLUMN wo_set INTEGER NOT NULL DEFAULT 0");
     d.exec("UPDATE payroll_adjust SET wo_set = 1 WHERE wo > 0");
   }
+  // Employee ID shown to users = the Petpooja attendance ID (filled by the
+  // attendance import, editable by hand). Blank until known; unique when set.
+  if (!hasCol("employees", "emp_code")) {
+    d.exec("ALTER TABLE employees ADD COLUMN emp_code TEXT NOT NULL DEFAULT ''");
+  }
+  d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_emp_code ON employees(emp_code COLLATE NOCASE) WHERE emp_code <> ''");
 }
 
 /** Write an audit entry. Never throws — auditing must not break a request. */

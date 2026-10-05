@@ -143,7 +143,7 @@ export function computeRow(emp, mk, basis) {
   const rec = recoveryFor(emp.id, mk);
   const net = earned + bonus - ded - rec;
   return {
-    id: emp.id, name: emp.name, desig, loc: emp.loc, salary, salaryDate: emp.salary_date || "", joining: emp.joining || "",
+    id: emp.id, empCode: emp.emp_code || "", name: emp.name, desig, loc: emp.loc, salary, salaryDate: emp.salary_date || "", joining: emp.joining || "",
     wd, wo, lv, bd, earned, bonus, ded, rec, net,
     woSet, woAuto, availDays: avail,
     wdOverride: adj ? adj.wd : null,

@@ -148,7 +148,7 @@ function filteredEmp() {
     if (st && (e.status || "Active") !== st) return false;
     if (jm && monthKeyOf(e.joining) !== jm) return false;
     if (state.empExtra && !state.empExtra.test(e)) return false;
-    if (q && !(`${e.name} ${e.desig} ${e.loc} ${e.phone || ""}`.toLowerCase().includes(q))) return false;
+    if (q && !(`${e.name} ${e.empCode || ""} ${e.desig} ${e.loc} ${e.phone || ""}`.toLowerCase().includes(q))) return false;
     return true;
   });
   const { k, d } = state.empSort;
@@ -162,6 +162,7 @@ function renderEmp() {
     const inactive = (e.status || "Active") === "Inactive";
     const cnt = state.kycCounts[e.id];
     return `<tr>
+      <td>${esc(e.empCode || "—")}</td>
       <td><strong>${esc(e.name)}</strong>${cnt ? ` <span class="chip">📎${cnt}</span>` : ""}</td>
       <td><span class="chip">${esc(e.desig || "—")}</span></td>
       <td><span class="chip loc">${esc(e.loc || "—")}</span></td>
@@ -174,7 +175,7 @@ function renderEmp() {
         ${w ? `<button class="icon-btn" data-act="edit" data-id="${e.id}" title="Edit">✎</button>` : ""}
         ${del ? `<button class="icon-btn del" data-act="del" data-id="${e.id}" title="Delete">🗑</button>` : ""}
       </div></td></tr>`;
-  }).join("") : `<tr><td colspan="9" class="empty">No employees match.</td></tr>`;
+  }).join("") : `<tr><td colspan="10" class="empty">No employees match.</td></tr>`;
   const cnt = $("empCount");
   if (cnt) cnt.textContent = list.length === state.employees.length
     ? `${list.length} employees` : `${list.length} of ${state.employees.length} employees`;
@@ -190,7 +191,7 @@ $("empBody").addEventListener("click", (e) => {
 $("btnAddEmp").addEventListener("click", () => empModal(null));
 
 const EMP_FIELDS = [
-  ["name","Name *","full"],["desig","Designation"],["loc","Location"],["joining","Joining","","date"],
+  ["name","Name *","full"],["empCode","Employee ID (Petpooja ID)"],["desig","Designation"],["loc","Location"],["joining","Joining","","date"],
   ["leaving","Leaving","","date"],
   ["salary","Monthly Salary (₹)","","number"],["salaryDate","Salary Date (day, e.g. 5 or 10)"],
   ["phone","Phone"],["status","Status","","status"],
@@ -256,7 +257,7 @@ async function toggleStatus(id) {
   } catch (err) { toast(err.error, true); }
 }
 function empExportRows() {
-  const cols = [["name","Name"],["desig","Designation"],["loc","Location"],["status","Status"],["joining","Joining"],
+  const cols = [["empCode","Employee ID"],["name","Name"],["desig","Designation"],["loc","Location"],["status","Status"],["joining","Joining"],
     ["leaving","Leaving"],["salary","Salary"],["salaryDate","Salary Date"],["phone","Phone"],
     ["bankName","Bank"],["accName","Acc Holder"],["accNo","Account No"],["ifsc","IFSC"],["upi","UPI"],["documents","List of Documents"]];
   const rows = [cols.map((c) => c[1])];
@@ -413,7 +414,7 @@ function offerBody(e, c) {
   const S = (n, title, body) => `<p style="margin:12px 0 2px 0"><b>${n}. ${title}</b></p>${P(body)}`;
   return `<h2>OFFER LETTER</h2>
     ${P("Date: ___________")}
-    ${P(`To,<br>Mr./Ms. <b>${esc(e.name)}</b>`)}
+    ${P(`To,<br>Mr./Ms. <b>${esc(e.name)}</b>${e.empCode ? `<br>Employee ID: <b>${esc(e.empCode)}</b>` : ""}`)}
     ${P("<b>Subject: Offer of Employment</b>")}
     ${P(`Dear Mr./Ms. ${esc(e.name)},`)}
     ${P(`We are pleased to offer you employment with <b>${esc(company)}</b> as <b>${esc(e.desig || "____________")}</b>, subject to the terms and conditions mentioned below.`)}
@@ -558,7 +559,7 @@ function filteredSortedPayRows() {
     if (loc && r.loc !== loc) return false;
     if (des && r.desig !== des) return false;
     if (pd && String(r.salaryDate) !== pd) return false;
-    if (q && !(`${r.name} ${r.desig} ${r.loc}`.toLowerCase().includes(q))) return false;
+    if (q && !(`${r.name} ${r.empCode || ""} ${r.desig} ${r.loc}`.toLowerCase().includes(q))) return false;
     return true;
   });
   return applySort(list, state.paySort, (r, k) => r[k], ["salary", "salaryDate", "wo", "lv", "wd", "earned", "bonus", "ded", "rec", "net"]);
@@ -578,6 +579,7 @@ function renderPayTable() {
       ? `<span style="color:var(--green)">${fmt(r.rec)} ✓</span>${w ? ` <button class="icon-btn rec-btn" data-unpost="${r.id}" data-mode="edit" title="Edit">✎</button><button class="icon-btn del rec-btn" data-unpost="${r.id}" data-mode="delete" title="Delete">🗑</button>` : ""}`
       : w ? `<input class="adj-input" type="number" min="0" value="${r.advOverride != null ? r.advOverride : ""}" placeholder="${r.rec}" data-adj="adv" data-id="${r.id}">` : fmt(r.rec);
     return `<tr>
+      <td>${esc(r.empCode || "—")}</td>
       <td><strong>${esc(r.name)}</strong></td><td><span class="chip">${esc(r.desig || "—")}</span></td><td><span class="chip loc">${esc(r.loc || "—")}</span></td>
       <td class="num">${esc(r.salaryDate || "—")}</td>
       <td>${esc(r.joining || "—")}</td>
@@ -590,9 +592,9 @@ function renderPayTable() {
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
       <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td>
       <td><button class="icon-btn" data-slip="${r.id}" title="Salary Slip (Word)">🧾</button></td></tr>`;
-  }).join("") || `<tr><td colspan="15" class="empty">No employees match.</td></tr>`;
+  }).join("") || `<tr><td colspan="16" class="empty">No employees match.</td></tr>`;
   const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
-  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="9">TOTAL — ${rows.length} employees</td>
+  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="10">TOTAL — ${rows.length} employees</td>
     <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td><td></td></tr>` : "";
   markSorted("#view-pay", state.paySort);
 }
@@ -619,11 +621,11 @@ async function postRecoveries() {
 }
 function payExportRows() {
   const bankOf = (id) => state.employees.find((e) => e.id === id) || {};
-  const rows = [["Name","Designation","Loc","Pay Date","Joining","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
+  const rows = [["Employee ID","Name","Designation","Loc","Pay Date","Joining","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
     "Bank Name","Account Holder","Account Number","IFSC","UPI"]];
   filteredSortedPayRows().forEach((r) => {
     const b = bankOf(r.id);
-    rows.push([r.name, r.desig, r.loc, r.salaryDate || "", r.joining || "", r.salary, r.wo, r.lv, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
+    rows.push([r.empCode || "", r.name, r.desig, r.loc, r.salaryDate || "", r.joining || "", r.salary, r.wo, r.lv, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
       b.bankName || "", b.accName || "", b.accNo || "", b.ifsc || "", b.upi || ""]);
   });
   return rows;
@@ -640,7 +642,7 @@ function slipBody(r, bank, label) {
   return `<h2>SALARY SLIP</h2>
     <p style="text-align:center;margin-top:-8px"><b>${esc(label)}</b></p>
     <table style="margin-bottom:12px">
-      ${info("Name", r.name)}${info("Designation", r.desig)}${info("Location", r.loc)}
+      ${info("Employee ID", r.empCode)}${info("Name", r.name)}${info("Designation", r.desig)}${info("Location", r.loc)}
       ${info("Date of Joining", r.joining)}${info("Salary Date", r.salaryDate)}
       ${bank.bankName ? info("Bank", `${bank.bankName}${bank.ifsc ? " / " + bank.ifsc : ""}`) : ""}
     </table>
@@ -692,21 +694,30 @@ $("attFile").addEventListener("change", async () => {
     try { resp = await api("/api/payroll/parse-attendance", { method: "POST", body: fd }); }
     catch (e) { return toast(e.error || "Could not read that PDF", true); }
     if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch {} }
-    data = resp.rows.map((r) => ({ name: r.name || String(r.id), present: r.present }));
+    data = resp.rows.map((r) => ({ name: r.name || String(r.id), present: r.present, pid: String(r.id || "") }));
   } else {
     let text; try { text = await f.text(); } catch { return toast("Could not read that file", true); }
     const rows = parseCSV(text);
     if (rows.length < 2) return toast("No rows found in the file", true);
     const hdr = rows[0].map((h) => normName(h));
     const col = (...names) => { for (const n of names) { const i = hdr.indexOf(normName(n)); if (i >= 0) return i; } return -1; };
-    const ci = { name: col("Name", "Employee Name", "Employee"), present: col("Present Days", "Present", "Working Days", "Days", "Payable Days") };
+    const ci = { name: col("Name", "Employee Name", "Employee"), present: col("Present Days", "Present", "Working Days", "Days", "Payable Days"),
+      pid: col("Petpooja ID", "Employee ID", "Emp ID", "Employee Code", "ID") };
     if (ci.name < 0 || ci.present < 0) return toast("CSV needs a Name and a Present Days column", true);
     if (!state.employees.length) { try { state.employees = (await api("/api/employees")).employees; } catch (e) { return toast(e.error, true); } }
-    data = rows.slice(1).map((r) => ({ name: (r[ci.name] || "").trim(), present: Number(String(r[ci.present] || "").replace(/[^0-9.]/g, "")) }));
+    data = rows.slice(1).map((r) => ({ name: (r[ci.name] || "").trim(), present: Number(String(r[ci.present] || "").replace(/[^0-9.]/g, "")),
+      pid: ci.pid >= 0 ? (r[ci.pid] || "").trim() : "" }));
   }
   data = data.filter((d) => d.name && isFinite(d.present));
   if (!data.length) return toast("No usable rows found", true);
-  data.forEach((d) => { const m = matchEmployee(d.name, ""); d.matchId = m.id; d.conf = m.conf; });
+  // Petpooja ID = Employee ID: keep only well-formed IDs (text, so "098" keeps its zero).
+  data.forEach((d) => { d.pid = /^[A-Za-z0-9\-/]{1,20}$/.test(d.pid || "") ? d.pid.toUpperCase() : ""; });
+  // Match by Employee ID first (exact once IDs are saved), then fall back to the name.
+  data.forEach((d) => {
+    const byId = d.pid && state.employees.find((e) => (e.empCode || "").toUpperCase() === d.pid);
+    if (byId) { d.matchId = byId.id; d.conf = "exact"; return; }
+    const m = matchEmployee(d.name, ""); d.matchId = m.id; d.conf = m.conf;
+  });
   attImportPreview(data);
 });
 function attImportPreview(data) {
@@ -716,6 +727,7 @@ function attImportPreview(data) {
   const flagOf = (c) => ({ exact: "✅", guess: "🟡", ambiguous: "⚠️", none: "❓" }[c] || "");
   const cur = (id) => (payData && payData.rows.find((r) => r.id === id));
   const body = data.map((d, i) => `<tr>
+      <td>${esc(d.pid || "—")}</td>
       <td>${flagOf(d.conf)} <b>${esc(d.name)}</b></td>
       <td class="num"><b>${d.present}</b></td>
       <td><select class="att-emp" data-i="${i}" style="min-width:190px">${opts(d.matchId)}</select>
@@ -725,30 +737,52 @@ function attImportPreview(data) {
   const label = payData ? payData.label : mk();
   openModal(`<h3>Import attendance → Working Days for ${esc(label)}</h3>
     <div style="padding:12px 20px;max-height:62vh;overflow:auto">
-      <div class="hint" style="margin-bottom:10px">✅ exact · 🟡 best guess · ⚠️ ambiguous · ❓ no match. <b>${needs}</b> row(s) worth checking. Present Days = full + ½ × half days. Applying sets each employee's <b>Working Days</b> for <b>${esc(label)}</b>.</div>
-      <table><thead><tr><th>Attendance name</th><th class="num">Present Days</th><th>Employee</th></tr></thead><tbody id="attPrevBody">${body}</tbody></table>
+      <div class="hint" style="margin-bottom:10px">✅ exact · 🟡 best guess · ⚠️ ambiguous · ❓ no match. <b>${needs}</b> row(s) worth checking. Present Days = full + ½ × half days. Applying sets each employee's <b>Working Days</b> for <b>${esc(label)}</b> and saves the <b>Petpooja ID as their Employee ID</b>. “Save Employee IDs only” leaves Working Days untouched.</div>
+      <table><thead><tr><th>Petpooja ID</th><th>Attendance name</th><th class="num">Present Days</th><th>Employee</th></tr></thead><tbody id="attPrevBody">${body}</tbody></table>
     </div>
-    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="btnAttApply">Apply</button></div>`, { protect: true });
+    <div class="foot"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="btnAttIds">Save Employee IDs only</button><button class="btn primary" id="btnAttApply">Apply</button></div>`, { protect: true });
   wireClose();
   $("attPrevBody").addEventListener("change", (e) => {
     const s = e.target.closest(".att-emp"); if (!s) return;
     data[Number(s.dataset.i)].matchId = s.value ? Number(s.value) : null;
   });
-  $("btnAttApply").addEventListener("click", () => applyAttImport(data));
+  $("btnAttApply").addEventListener("click", () => applyAttImport(data, false));
+  $("btnAttIds").addEventListener("click", () => applyAttImport(data, true));
 }
-async function applyAttImport(data) {
+/** Apply the reviewed attendance rows: save Petpooja IDs as Employee IDs and,
+ *  unless idsOnly, set Working Days for the shown month. */
+async function applyAttImport(data, idsOnly) {
   const toApply = data.filter((d) => d.matchId);
   if (!toApply.length) return toast("Nothing selected to apply", true);
   const monthMk = mk(), label = payData ? payData.label : monthMk;
-  if (!confirm(`Set Working Days for ${new Set(toApply.map((d) => d.matchId)).size} employee(s) for ${label}?`)) return;
-  const btn = $("btnAttApply"); if (btn) { btn.disabled = true; btn.textContent = "Applying…"; }
-  let ok = 0, fail = 0;
-  for (const d of toApply) {
+  // One ID per employee (first row wins), and only where it differs from what is saved.
+  const seen = new Set();
+  const idRows = toApply.filter((d) => {
+    if (!d.pid || seen.has(d.matchId)) return false; seen.add(d.matchId);
+    const e = state.employees.find((x) => x.id === d.matchId);
+    return e && (e.empCode || "").toUpperCase() !== d.pid;
+  });
+  if (idsOnly && !idRows.length) return toast("Employee IDs are already up to date");
+  const n = new Set(toApply.map((d) => d.matchId)).size;
+  if (!confirm(idsOnly ? `Save the Petpooja ID as Employee ID for ${idRows.length} employee(s)? Working Days are not changed.`
+    : `Set Working Days for ${n} employee(s) for ${label}${idRows.length ? ` and save ${idRows.length} Employee ID(s)` : ""}?`)) return;
+  ["btnAttApply", "btnAttIds"].forEach((b) => { if ($(b)) $(b).disabled = true; });
+  let ok = 0, fail = 0, idOk = 0; const idErr = [];
+  for (const d of idRows) {
+    try { await api(`/api/employees/${d.matchId}/emp-code`, { method: "PUT", body: { empCode: d.pid } }); idOk++; }
+    catch (e) { idErr.push(e.error || `${d.pid}: failed`); }
+  }
+  if (!idsOnly) for (const d of toApply) {
     try { await api(`/api/payroll/${monthMk}/${d.matchId}`, { method: "PUT", body: { wd: d.present } }); ok++; }
     catch { fail++; }
   }
   closeModal();
-  toast(`Working days set for ${ok} employee(s)${fail ? `, ${fail} failed` : ""}`);
+  try { state.employees = (await api("/api/employees")).employees; } catch {}
+  const parts = [];
+  if (!idsOnly) parts.push(`Working days set for ${ok} employee(s)${fail ? `, ${fail} failed` : ""}`);
+  if (idOk || idsOnly) parts.push(`${idOk} Employee ID(s) saved`);
+  if (idErr.length) parts.push(`${idErr.length} ID(s) not saved — ${idErr[0]}`);
+  toast(parts.join(" · "), !!idErr.length);
   renderPayroll();
 }
 

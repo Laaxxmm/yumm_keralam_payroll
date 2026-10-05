@@ -8,8 +8,11 @@ import { dmyToIso } from "../services/payroll.js";
 
 const router = Router();
 
+const EmpCode = z.string().trim().toUpperCase().max(20).regex(/^[A-Z0-9\-/]*$/, "Employee ID: letters, digits, - or / only");
 const EmployeeSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
+  // Employee ID shown to users = Petpooja attendance ID (kept as text: leading zeros matter). Blank = not set.
+  empCode: EmpCode.default(""),
   desig: z.string().trim().max(80).default(""),
   loc: z.string().trim().max(80).default(""),
   joining: z.string().trim().max(20).default(""),
@@ -47,7 +50,7 @@ const EmployeeSchema = z.object({
 function toApi(row, role) {
   const canSeeBank = role === "admin" || role === "hr";
   const out = {
-    id: row.id, name: row.name, desig: row.desig, loc: row.loc, joining: row.joining,
+    id: row.id, empCode: row.emp_code || "", name: row.name, desig: row.desig, loc: row.loc, joining: row.joining,
     leaving: row.leaving || "", salaryDate: row.salary_date || "", salary: row.salary, phone: row.phone, status: row.status,
     fatherName: row.father_name, dob: row.dob, address: row.address,
     qualGen: row.qual_gen, qualTech: row.qual_tech, experience: row.experience,
@@ -58,6 +61,15 @@ function toApi(row, role) {
   };
   if (canSeeBank) out.accNo = decryptField(row.acc_no_enc);
   return out;
+}
+
+/** Throw a 400 if another employee already uses this Employee ID. */
+function assertEmpCodeFree(code, exceptId) {
+  if (!code) return;
+  const clash = getDb()
+    .prepare("SELECT name FROM employees WHERE emp_code = ? COLLATE NOCASE AND id <> ?")
+    .get(code, exceptId ?? 0);
+  if (clash) { const err = new Error(`Employee ID ${code} is already used by ${clash.name}.`); err.status = 400; throw err; }
 }
 
 router.get("/", (req, res) => {
@@ -76,16 +88,17 @@ router.post("/", requireRole("admin", "hr"), (req, res) => {
   if (!parsed.success)
     return res.status(400).json({ error: parsed.error.issues[0].message });
   const e = parsed.data;
+  try { assertEmpCodeFree(e.empCode); } catch (err) { return res.status(err.status).json({ error: err.message }); }
   const info = getDb()
     .prepare(
       `INSERT INTO employees
-        (name,desig,loc,joining,leaving,salary_date,salary,phone,status,father_name,dob,address,qual_gen,qual_tech,
+        (emp_code,name,desig,loc,joining,leaving,salary_date,salary,phone,status,father_name,dob,address,qual_gen,qual_tech,
          experience,lang_read,lang_write,lang_speak,report_time,hobbies,documents,
          bank_name,acc_name,acc_no_enc,ifsc,branch,upi)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .run(
-      e.name, e.desig, e.loc, e.joining, e.leaving, e.salaryDate, e.salary, e.phone, e.status, e.fatherName, e.dob,
+      e.empCode, e.name, e.desig, e.loc, e.joining, e.leaving, e.salaryDate, e.salary, e.phone, e.status, e.fatherName, e.dob,
       e.address, e.qualGen, e.qualTech, e.experience, e.langRead, e.langWrite, e.langSpeak,
       e.reportTime, e.hobbies, e.documents, e.bankName, e.accName,
       encryptField(e.accNo), e.ifsc, e.branch, e.upi
@@ -104,6 +117,8 @@ export function applyEmployeeUpdate(id, e, req) {
   const db = getDb();
   const cur = db.prepare("SELECT * FROM employees WHERE id = ?").get(id);
   if (!cur) { const err = new Error("Employee not found."); err.status = 404; throw err; }
+  const empCode = e.empCode;
+  assertEmpCodeFree(empCode, id);
   const effective = dmyToIso(e.effectiveFrom) || new Date().toISOString().slice(0, 10);
   const insHist = db.prepare(
     "INSERT INTO emp_history (emp_id, field, old_value, new_value, effective, changed_by) VALUES (?,?,?,?,?,?)"
@@ -111,13 +126,13 @@ export function applyEmployeeUpdate(id, e, req) {
   db.exec("BEGIN");
   try {
     db.prepare(
-      `UPDATE employees SET name=?,desig=?,loc=?,joining=?,leaving=?,salary_date=?,salary=?,phone=?,status=?,
+      `UPDATE employees SET emp_code=?,name=?,desig=?,loc=?,joining=?,leaving=?,salary_date=?,salary=?,phone=?,status=?,
          father_name=?,dob=?,address=?,qual_gen=?,qual_tech=?,experience=?,
          lang_read=?,lang_write=?,lang_speak=?,report_time=?,hobbies=?,documents=?,
          bank_name=?,acc_name=?,acc_no_enc=?,ifsc=?,branch=?,upi=?,updated_at=datetime('now')
        WHERE id=?`
     ).run(
-      e.name, e.desig, e.loc, e.joining, e.leaving, e.salaryDate, e.salary, e.phone, e.status, e.fatherName, e.dob,
+      empCode, e.name, e.desig, e.loc, e.joining, e.leaving, e.salaryDate, e.salary, e.phone, e.status, e.fatherName, e.dob,
       e.address, e.qualGen, e.qualTech, e.experience, e.langRead, e.langWrite, e.langSpeak,
       e.reportTime, e.hobbies, e.documents, e.bankName, e.accName,
       encryptField(e.accNo), e.ifsc, e.branch, e.upi, id
@@ -155,6 +170,7 @@ router.put("/:id", requireRole("admin", "hr"), (req, res) => {
   if (!parsed.success)
     return res.status(400).json({ error: parsed.error.issues[0].message });
   const e = parsed.data;
+  try { assertEmpCodeFree(e.empCode, id); } catch (err) { return res.status(err.status).json({ error: err.message }); }
 
   // Maker–checker: hr changing salary/designation/bank details needs an admin.
   if (req.user.role === "hr") {
@@ -169,7 +185,24 @@ router.put("/:id", requireRole("admin", "hr"), (req, res) => {
       return res.status(202).json({ queued: true, approvalId: aid });
     }
   }
-  applyEmployeeUpdate(id, e, req);
+  try { applyEmployeeUpdate(id, e, req); }
+  catch (err) { if (err.status === 400) return res.status(400).json({ error: err.message }); throw err; }
+  res.json({ ok: true });
+});
+
+/**
+ * PUT /api/employees/:id/emp-code — set just the Employee ID (used when the
+ * attendance import saves Petpooja IDs), without resending the whole record.
+ */
+router.put("/:id/emp-code", requireRole("admin", "hr"), (req, res) => {
+  const id = Number(req.params.id);
+  const cur = getDb().prepare("SELECT name, emp_code FROM employees WHERE id = ?").get(id);
+  if (!cur) return res.status(404).json({ error: "Employee not found." });
+  const parsed = EmpCode.safeParse(req.body && req.body.empCode);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  try { assertEmpCodeFree(parsed.data, id); } catch (err) { return res.status(err.status).json({ error: err.message }); }
+  getDb().prepare("UPDATE employees SET emp_code = ?, updated_at = datetime('now') WHERE id = ?").run(parsed.data, id);
+  audit(req, "employee.emp_code", "employee", id, `${cur.name}: ${cur.emp_code || "—"} → ${parsed.data || "—"}`);
   res.json({ ok: true });
 });
 

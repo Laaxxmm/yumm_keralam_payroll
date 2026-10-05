@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yumm HR</title>
-<link rel="stylesheet" href="/styles.css?v=20261001b">
+<link rel="stylesheet" href="/styles.css?v=20261005b">
 </head>
 <body>
 <!-- Login -->
@@ -46,7 +46,7 @@
 
     <section id="view-emp" hidden>
       <div class="toolbar">
-        <input class="search" id="empSearch" type="search" name="emp-search" autocomplete="off" placeholder="🔍 Search name, designation, phone…">
+        <input class="search" id="empSearch" type="search" name="emp-search" autocomplete="off" placeholder="🔍 Search name, ID, designation, phone…">
         <select id="empLoc"><option value="">All Locations</option></select>
         <select id="empDesig"><option value="">All Designations</option></select>
         <select id="empStatus"><option value="">All Status</option><option>Active</option><option>Inactive</option></select>
@@ -58,7 +58,7 @@
         <button class="btn primary write-only" id="btnAddEmp">＋ Add Employee</button>
       </div>
       <table><thead><tr>
-        <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Location</th>
+        <th data-sort="empCode">Employee ID</th><th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Location</th>
         <th data-sort="joining">Joining</th><th class="num" data-sort="salary">Salary</th>
         <th class="num" data-sort="salaryDate">Salary Date</th>
         <th>Phone</th><th data-sort="status">Status</th><th></th>
@@ -84,13 +84,13 @@
       <div class="basis-note" id="basisNote"></div>
       <div id="recBanner"></div>
       <div class="toolbar">
-        <input class="search" id="paySearch" type="search" name="pay-search" autocomplete="off" placeholder="🔍 Search name, designation…">
+        <input class="search" id="paySearch" type="search" name="pay-search" autocomplete="off" placeholder="🔍 Search name, ID, designation…">
         <select id="payLoc"><option value="">All Locations</option></select>
         <select id="payDesig"><option value="">All Designations</option></select>
         <select id="payDate"><option value="">All Pay Dates</option></select>
       </div>
       <table><thead><tr>
-        <th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Loc</th>
+        <th data-sort="empCode">Employee ID</th><th data-sort="name">Name</th><th data-sort="desig">Designation</th><th data-sort="loc">Loc</th>
         <th class="num" data-sort="salaryDate">Pay Date</th>
         <th data-sort="joining">Joining</th>
         <th class="num" data-sort="salary">Salary</th>
@@ -184,6 +184,6 @@
 
 <div class="modal-bg" id="modal"><div class="modal" id="modalCard"></div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?v=20261001b"></script>
+<script src="/app.js?v=20261005b"></script>
 </body>
 </html>
