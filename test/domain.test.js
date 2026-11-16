@@ -392,3 +392,22 @@ test("week-off bonus (Oct 2026+): unused week offs paid as WO Bonus; attendance 
   r = await row("2026-8");
   assert.deepEqual([r.woBonus, r.paidDays, r.earned], [0, 30, 30000]);
 });
+
+test("salary slips PDF: one A4 page per employee, in the requested order", async () => {
+  const mk = "2026-9";
+  const mkEmp = async (name) => (await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name, salary: 31000, status: "Active", joining: "01.01.2026" }) })).json()).id;
+  const a = await mkEmp("PDF Slip A"), b = await mkEmp("PDF Slip B");
+  const res = await api(`/api/payroll/${mk}/slips.pdf?basis=cal&ids=${b},${a}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/pdf");
+  assert.match(res.headers.get("content-disposition"), /attachment; filename="SalarySlips_October_2026\.pdf"/);
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.equal(buf.subarray(0, 5).toString(), "%PDF-");
+  assert.equal((buf.toString("latin1").match(/\/Type \/Page\b/g) || []).length, 2);
+
+  const one = await api(`/api/payroll/${mk}/slips.pdf?ids=${a}`);
+  assert.equal(one.status, 200);
+  assert.match(one.headers.get("content-disposition"), /SalarySlip_PDF_Slip_A_October_2026\.pdf/);
+  assert.equal((await api(`/api/payroll/${mk}/slips.pdf?ids=999999`)).status, 404);
+  assert.equal((await api(`/api/payroll/bad/slips.pdf`)).status, 400);
+});

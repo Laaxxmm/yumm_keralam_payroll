@@ -478,11 +478,11 @@ async function downloadOfferFor(id) {
   const c = await ensureCompany();
   await downloadDoc("OfferLetter_" + safe(e.name), offerHtml(e, c));
 }
+/** A hard page break Word honours (it ignores CSS page-break on <div>s). */
+const WORD_PAGE_BREAK = `<br clear="all" style="mso-special-character:line-break;page-break-before:always">`;
 /** One Word file with an offer letter per employee, each starting on a new page. */
 function offerLettersAllHtml(list, c) {
-  return docShell(list.map((e, i) =>
-    `<div${i < list.length - 1 ? ' style="page-break-after:always"' : ""}>${offerBody(e, c)}</div>`
-  ).join(""));
+  return docShell(list.map((e) => offerBody(e, c)).join(WORD_PAGE_BREAK));
 }
 async function downloadAllOfferLetters() {
   const list = filteredEmp();
@@ -522,6 +522,12 @@ function initPayControls() {
   $("btnExportPay").addEventListener("click", () => { if (payData) downloadCSV(payFileBase() + ".csv", payExportRows()); });
   $("btnExportPayXlsx").addEventListener("click", () => { if (payData) downloadXLSX(payFileBase() + ".xlsx", "Payroll", payExportRows()); });
   $("btnSlips").addEventListener("click", () => { if (payData) slipsAll(); });
+  $("btnSlipsPdf").addEventListener("click", () => {
+    if (!payData) return;
+    const rows = filteredSortedPayRows();
+    if (!rows.length) return toast("No employees to generate slips for.", true);
+    slipsPdf(rows.map((r) => r.id));
+  });
   ["paySearch", "payLoc", "payDesig", "payDate"].forEach((id) => $(id).addEventListener("input", renderPayTable));
   wireSortHeader("#view-pay", state.paySort, renderPayTable);
 }
@@ -589,7 +595,7 @@ function renderPayTable() {
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
       <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td>
-      <td><button class="icon-btn" data-slip="${r.id}" title="Salary Slip (Word)">🧾</button></td></tr>`;
+      <td><div class="rowbtns"><button class="icon-btn" data-slip="${r.id}" title="Salary Slip (Word)">🧾</button><button class="icon-btn" data-slippdf="${r.id}" title="Salary Slip (PDF)">📕</button></div></td></tr>`;
   }).join("") || `<tr><td colspan="18" class="empty">No employees match.</td></tr>`;
   const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, woBonus: t.woBonus + r.woBonus, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, woBonus: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
   $("payFoot").innerHTML = rows.length ? `<tr><td colspan="11">TOTAL — ${rows.length} employees</td>
@@ -605,6 +611,7 @@ $("payBody").addEventListener("change", async (e) => {
 });
 $("payBody").addEventListener("click", async (e) => {
   const sl = e.target.closest("[data-slip]"); if (sl) return slipFor(Number(sl.dataset.slip));
+  const sp = e.target.closest("[data-slippdf]"); if (sp) return slipsPdf([Number(sp.dataset.slippdf)]);
   const b = e.target.closest("[data-unpost]"); if (!b) return;
   const mode = b.dataset.mode, empId = Number(b.dataset.unpost);
   // Recoveries are booked automatically, so "edit" = book a different amount for this month.
@@ -638,28 +645,52 @@ function payFileBase() { return `Payroll_${MONTHS[+$("payMonth").value]}_${$("pa
 /* -------- Salary slips (Word) — per employee or bulk, for the shown month -------- */
 function slipLabel() { return `${MONTHS[+$("payMonth").value]} ${$("payYear").value}`; }
 /** Slip body (no letterhead/shell); reused for single + bulk output. */
+/**
+ * Salary slip body: compact so one employee always fits one A4 page under the
+ * letterhead (details in two columns, attendance in one row, then the salary
+ * breakup: Salary, Add Bonus, Add Week-off Bonus, Less Unpaid Leave, Less
+ * Advance, [Less Other Deductions] = Net Payable).
+ */
 function slipBody(r, bank, label) {
-  const info = (l, v) => `<tr><td class="lbl">${l}</td><td>${esc(v || "—")}</td></tr>`;
-  const line = (l1, v1, l2, v2) =>
-    `<tr><td class="lbl">${l1}</td><td style="text-align:right">${v1}</td><td class="lbl">${l2}</td><td style="text-align:right">${v2}</td></tr>`;
-  return `<h2>SALARY SLIP</h2>
-    <p style="text-align:center;margin-top:-8px"><b>${esc(label)}</b></p>
-    <table style="margin-bottom:12px">
-      ${info("Employee ID", r.empCode)}${info("Name", r.name)}${info("Designation", r.desig)}${info("Location", r.loc)}
-      ${info("Date of Joining", r.joining)}${info("Salary Date", r.salaryDate)}
-      ${bank.bankName ? info("Bank", `${bank.bankName}${bank.ifsc ? " / " + bank.ifsc : ""}`) : ""}
+  const P = "padding:4px 8px";
+  const L = (t) => `<td style="${P};font-weight:bold;width:22%">${t}</td>`;
+  const V = (t) => `<td style="${P};width:28%">${esc(t || "—")}</td>`;
+  const woUnused = r.woUnused || 0, woBonus = r.woBonus || 0;
+  const payDays = (r.paidDays != null ? r.paidDays : r.bd) - woUnused;   // salary days, excl. the bonus days
+  const unpaidDays = Math.max(0, r.bd - payDays);
+  const cut = (r.salary || 0) - (r.earned || 0);                          // salary − earned = unpaid leave
+  const perDay = r.bd ? Math.round((r.salary || 0) / r.bd) : 0;
+  const note = (t) => (t ? ` <span style="font-size:9pt;font-weight:normal">${t}</span>` : "");
+  const amt = (lbl, n, v, sign) => `<tr><td style="${P}">${lbl}${note(n)}</td><td style="${P};text-align:right;width:32%">${sign}${fmt(v)}</td></tr>`;
+  const days = (h, v) => `<td style="${P};text-align:center"><b style="font-size:9pt">${h}</b><br>${v ?? 0}</td>`;
+  const midMonth = r.availDays != null && r.availDays < r.bd;
+  return `<h2 style="margin:0 0 2px">SALARY SLIP</h2>
+    <p style="text-align:center;margin:0 0 10px"><b>${esc(label)}</b></p>
+    <table style="margin-bottom:10px;font-size:11pt">
+      <tr>${L("Employee ID")}${V(r.empCode)}${L("Name")}${V(r.name)}</tr>
+      <tr>${L("Designation")}${V(r.desig)}${L("Location")}${V(r.loc)}</tr>
+      <tr>${L("Date of Joining")}${V(r.joining)}${L("Salary Date")}${V(r.salaryDate)}</tr>
+      ${bank.bankName ? `<tr>${L("Bank")}<td colspan="3" style="${P}">${esc(`${bank.bankName}${bank.ifsc ? " / " + bank.ifsc : ""}`)}</td></tr>` : ""}
     </table>
-    <table>
-      ${line("Base Days", r.bd, "Monthly Salary", fmt(r.salary))}
-      ${line("Week Off taken (paid)", r.wo, "Earned", fmt(r.earned))}
-      ${line("Unused Week Off", r.woUnused || 0, "+ WO Bonus", fmt(r.woBonus || 0))}
-      ${line("Leaves", r.lv, "+ Bonus", fmt(r.bonus))}
-      ${line("Work Days", r.wd, "− Other Deductions", fmt(r.ded))}
-      ${line("Paid Days", r.paidDays, "− Advance Recovery", fmt(r.rec))}
-      <tr><td class="lbl" style="font-size:14pt">NET PAYABLE</td>
-        <td colspan="3" style="text-align:right;font-weight:bold;font-size:14pt">₹ ${fmt(r.net)}</td></tr>
+    <p style="margin:0 0 4px"><b>Attendance</b></p>
+    <table style="margin-bottom:10px;font-size:11pt"><tr>
+      ${days("Base Days", r.bd)}${days("Week Off Taken", r.wo)}${days("Unused Week Off", woUnused)}
+      ${days("Leaves", r.lv)}${days("Work Days", r.wd)}${days("Paid Days", r.paidDays ?? payDays)}
+    </tr></table>
+    <p style="margin:0 0 4px"><b>Salary Breakup</b></p>
+    <table style="font-size:11pt">
+      ${amt("Monthly Salary", "", r.salary, "")}
+      ${amt("Add: Bonus", "", r.bonus, "+ ")}
+      ${amt("Add: Week-off Bonus", woUnused ? `(${woUnused} unused week off × ${fmt(perDay)}/day)` : "", woBonus, "+ ")}
+      ${cut >= 0
+        ? amt("Less: Unpaid Leave", unpaidDays ? `(${unpaidDays} day(s)${midMonth ? ", incl. days not employed" : ""} × ${fmt(perDay)}/day)` : "", cut, "− ")
+        : amt("Add: Extra Days Worked", "", -cut, "+ ")}
+      ${amt("Less: Advance Recovery", "", r.rec, "− ")}
+      ${r.ded ? amt("Less: Other Deductions", "", r.ded, "− ") : ""}
+      <tr><td style="${P};font-weight:bold;font-size:13pt">NET PAYABLE</td>
+        <td style="${P};text-align:right;font-weight:bold;font-size:13pt">${fmt(r.net)}</td></tr>
     </table>
-    <p style="margin-top:30px;font-size:10pt">This is a system-generated salary slip and does not require a signature.</p>`;
+    <p style="margin:18px 0 0;font-size:9pt">This is a system-generated salary slip and does not require a signature.</p>`;
 }
 async function slipFor(id) {
   const r = (payData && payData.rows || []).find((x) => x.id === id);
@@ -669,14 +700,29 @@ async function slipFor(id) {
   downloadDoc(`SalarySlip_${safe(r.name)}_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`,
     docWrap(slipBody(r, bank, slipLabel()), c));
 }
+/** Salary slip(s) as a PDF made on the server — one page per employee, in the given order. */
+async function slipsPdf(ids) {
+  const label = `${MONTHS[+$("payMonth").value]}_${$("payYear").value}`;
+  const one = ids.length === 1 && payData && payData.rows.find((r) => r.id === ids[0]);
+  toast("Preparing PDF…");
+  try {
+    const blob = await api(`/api/payroll/${mk()}/slips.pdf?basis=${state.basis}&ids=${ids.join(",")}`);
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = u;
+    a.download = one ? `SalarySlip_${safe(one.name)}_${label}.pdf` : `SalarySlips_${label}.pdf`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
+    toast("Downloaded");
+  } catch (e) { toast(e.error || "Could not make the PDF", true); }
+}
 async function slipsAll() {
   const rows = filteredSortedPayRows();
   if (!rows.length) return toast("No employees to generate slips for.", true);
   const label = slipLabel();
+  // One slip per page (each slip fits one page, so this never splits one).
   const inner = rows.map((r) => {
     const bank = state.employees.find((e) => e.id === r.id) || {};
     return slipBody(r, bank, label);
-  }).join('<div style="page-break-before:always"></div>');
+  }).join(WORD_PAGE_BREAK);
   downloadDoc(`SalarySlips_${MONTHS[+$("payMonth").value]}_${$("payYear").value}`, docShell(inner));
 }
 

@@ -9,6 +9,7 @@ import {
 } from "../services/payroll.js";
 import { queueApproval } from "../services/approvals.js";
 import { parseAttendancePdf } from "../services/attendance.js";
+import { writeSlipsPdf } from "../services/slipPdf.js";
 
 const router = Router();
 const MK_RE = /^\d{4}-(?:[0-9]|1[01])$/; // YYYY-monthIndex(0..11)
@@ -37,6 +38,30 @@ router.use("/parse-attendance", (err, _req, res, next) => {
 });
 
 /** GET /api/payroll/:mk?basis=cal|30|26 — server-computed rows + totals. */
+/**
+ * GET /api/payroll/:mk/slips.pdf?basis=cal|30|26&ids=1,2,3 — salary slips as one
+ * PDF, one page per employee (ids keep their order; no ids = everyone on that
+ * month's payroll). Same numbers as the payroll table.
+ */
+router.get("/:mk/slips.pdf", (req, res) => {
+  const mk = req.params.mk;
+  if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
+  const basis = ["cal", "30", "26"].includes(req.query.basis) ? req.query.basis : "cal";
+  const ids = String(req.query.ids || "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 1000);
+  autoPostDue(req.user);
+  const all = new Map(employeesForMonth(mk).map((e) => [e.id, e]));
+  const emps = ids.length ? ids.map((id) => all.get(id)).filter(Boolean) : [...all.values()];
+  if (!emps.length) return res.status(404).json({ error: "No employees on that month's payroll." });
+  const rows = emps.map((e) => computeRow(e, mk, basis));
+  const banks = new Map(emps.map((e) => [e.id, { bank_name: e.bank_name, ifsc: e.ifsc }]));
+  const label = monthLabel(mk);
+  const file = rows.length === 1 ? `SalarySlip_${rows[0].name}_${label}` : `SalarySlips_${label}`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${file.replace(/[^\w.-]+/g, "_")}.pdf"`);
+  audit(req, "payroll.slips_pdf", "payroll", mk, `${rows.length} slip(s)`);
+  writeSlipsPdf(res, rows, banks, label);
+});
+
 router.get("/:mk", (req, res) => {
   const mk = req.params.mk;
   if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
