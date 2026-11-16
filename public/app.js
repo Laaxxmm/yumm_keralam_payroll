@@ -568,7 +568,7 @@ function filteredSortedPayRows() {
 function renderPayTable() {
   if (!payData) return;
   const w = canWrite();
-  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type to override). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. <b>Advances are deducted automatically</b> (from Oct 2026) in the month they are given — in full, or the installment each month. Salary is as it was that month.`;
+  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type to override). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. <b>Advances are deducted automatically</b> in full in the month they are given (from Oct 2026, an advance with an installment is deducted by that installment each month instead). Salary is as it was that month.`;
   const rows = filteredSortedPayRows();
   $("payBody").innerHTML = rows.map((r) => {
     const recCell = r.advPosted
@@ -604,11 +604,21 @@ $("payBody").addEventListener("change", async (e) => {
 $("payBody").addEventListener("click", async (e) => {
   const sl = e.target.closest("[data-slip]"); if (sl) return slipFor(Number(sl.dataset.slip));
   const b = e.target.closest("[data-unpost]"); if (!b) return;
-  const mode = b.dataset.mode;
-  if (!confirm(mode === "delete" ? "Delete this recovery? The amount returns to the balance." : "Un-post to edit? The amount returns to the balance.")) return;
-  try { const r = await api(`/api/payroll/${mk()}/unpost/${b.dataset.unpost}`, { method: "POST", body: { mode } });
-    toast(r && r.queued ? "✋ Sent for admin approval" : "Done"); renderPayroll(); }
-  catch (err) { toast(err.error, true); }
+  const mode = b.dataset.mode, empId = Number(b.dataset.unpost);
+  // Recoveries are booked automatically, so "edit" = book a different amount for this month.
+  let amt = null;
+  if (mode === "edit") {
+    const cur = (payData && payData.rows.find((r) => r.id === empId)) || {};
+    const v = prompt("Recovery to deduct this month (₹):", cur.rec != null ? cur.rec : "");
+    if (v == null) return;
+    amt = Math.max(0, Math.round(Number(String(v).replace(/[^0-9.]/g, "")) || 0));
+  } else if (!confirm("Don't recover anything this month? The amount stays on the advance balance.")) return;
+  try {
+    const r = await api(`/api/payroll/${mk()}/unpost/${empId}`, { method: "POST", body: { mode } });
+    if (r && r.queued) { toast("✋ Sent for admin approval"); return renderPayroll(); }
+    if (mode === "edit") await api(`/api/payroll/${mk()}/${empId}`, { method: "PUT", body: { adv: amt } });
+    toast("Done"); renderPayroll();
+  } catch (err) { toast(err.error, true); }
 });
 function payExportRows() {
   const bankOf = (id) => state.employees.find((e) => e.id === id) || {};

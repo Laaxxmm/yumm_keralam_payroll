@@ -242,6 +242,10 @@ function migrate(d) {
   if (!hasCol("employees", "emp_code")) {
     d.exec("ALTER TABLE employees ADD COLUMN emp_code TEXT NOT NULL DEFAULT ''");
   }
+  // One automatic salary recovery per advance per month. An older database may
+  // still hold duplicates from hand posting; start-up re-booking clears them and
+  // then creates this index (server.js), so a failure here is not fatal.
+  try { d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_auto_once ON advance_payments(advance_id, mk) WHERE kind = 'auto'"); } catch {}
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_emp_code ON employees(emp_code COLLATE NOCASE) WHERE emp_code <> ''");
 }
 

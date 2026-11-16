@@ -81,36 +81,42 @@ export function getAdjust(mk, empId) {
 }
 
 /*
- * Automatic advance recovery (October 2026 = "2026-9" onward): an advance is
- * deducted in the payroll of the month it was given — in full when it has no
- * installment, otherwise its installment each month from that month on — and
- * the deduction is booked against the advance without a manual "post" step.
- * Earlier months keep the old rules (installment only, posted by hand) so
- * payroll that was already paid never changes.
+ * Automatic advance recovery — booked against the advance with no manual
+ * "post" step, in every month from the first advance on:
+ *  - an advance is recovered in the payroll of the month it was given, in full;
+ *  - from October 2026 ("2026-9"), an advance WITH an installment is instead
+ *    recovered by that installment each month, starting the month it was given.
+ * Undated advances have no month, so they are only recovered by installment
+ * (Oct 2026 on) or by hand.
  */
-export const AUTO_RECOVERY_FROM = "2026-9";
+export const INSTALLMENTS_FROM = "2026-9";
 const mkNum = (mk) => { const p = mkParts(mk); return p.y * 12 + p.m; };
-export function autoRecoveryApplies(mk) { return mkNum(mk) >= mkNum(AUTO_RECOVERY_FROM); }
 /** Payroll month key of a dd.mm.yyyy date, or null. */
 export function mkOfDate(s) { const iso = dmyToIso(s); return iso ? `${+iso.slice(0, 4)}-${+iso.slice(5, 7) - 1}` : null; }
 /** The current month in India (IST), as a month key. */
 export function currentMk() { const d = new Date(Date.now() + 5.5 * 3600e3); return `${d.getUTCFullYear()}-${d.getUTCMonth()}`; }
-/** Months whose recoveries are due now: AUTO_RECOVERY_FROM .. current month. */
+/** Months whose recoveries are due now: the first advance's month .. current month. */
 export function dueMonths() {
-  const out = [], end = mkNum(currentMk());
-  for (let n = mkNum(AUTO_RECOVERY_FROM); n <= end; n++) out.push(`${Math.floor(n / 12)}-${n % 12}`);
+  const end = mkNum(currentMk());
+  let start = Math.min(end, mkNum(INSTALLMENTS_FROM));
+  for (const r of getDb().prepare("SELECT date FROM advances").all()) {
+    const m = mkOfDate(r.date); if (m) start = Math.min(start, mkNum(m));
+  }
+  const out = [];
+  for (let n = start; n <= end; n++) out.push(`${Math.floor(n / 12)}-${n % 12}`);
   return out;
 }
 
 /** Scheduled recovery for a month: sum over open advances of min(installment, balance). */
 export function schedRecovery(empId, mk) {
   let total = 0;
-  const auto = autoRecoveryApplies(mk);
+  const installments = mkNum(mk) >= mkNum(INSTALLMENTS_FROM);
   for (const a of openAdvances(empId)) {
     const issued = mkOfDate(a.date);
-    if (auto && issued && mkNum(issued) > mkNum(mk)) continue; // given after this month
-    // No installment: from Oct 2026, deducted in full in the month it was given.
-    const inst = a.installment > 0 ? a.installment : auto && issued === mk ? Infinity : 0;
+    if (issued && mkNum(issued) > mkNum(mk)) continue; // given after this month
+    // In full in the month it was given; from Oct 2026 an installment, if set, instead.
+    const full = issued === mk ? Infinity : 0;
+    const inst = installments && a.installment > 0 ? a.installment : full;
     if (inst <= 0) continue;
     const already = getDb()
       .prepare("SELECT COALESCE(SUM(amount),0) AS s FROM advance_payments WHERE advance_id=? AND kind='auto' AND mk=?")
@@ -200,13 +206,33 @@ export function employeesForMonth(mk) {
   });
 }
 
-/**
- * Post this month's recoveries: for each active employee, apply the scheduled
- * (or overridden) amount FIFO across their open advances, writing auto payments
- * and flagging the month as posted. Idempotent per employee.
- */
-export function postRecoveries(mk, actor) {
+/** Run fn inside one transaction (all-or-nothing). */
+function tx(fn) {
   const db = getDb();
+  db.exec("BEGIN IMMEDIATE");
+  try { const r = fn(db); db.exec("COMMIT"); return r; }
+  catch (e) { db.exec("ROLLBACK"); throw e; }
+}
+
+/** How much of this advance falls due in month mk (advance balance as it stands). */
+function dueFromAdvance(a, mk) {
+  const issued = mkOfDate(a.date);
+  if (issued && mkNum(issued) > mkNum(mk)) return 0; // given after this month
+  const inst = mkNum(mk) >= mkNum(INSTALLMENTS_FROM) && a.installment > 0 ? a.installment
+    : issued === mk ? Infinity : 0;
+  return Math.max(0, Math.min(inst, a.balance));
+}
+
+/**
+ * Book month mk's recoveries for every employee on that payroll. No
+ * transaction of its own — callers wrap it. Duplicate-proof:
+ *  - an employee-month already booked (flag + payments behind it) is skipped;
+ *  - otherwise any auto payments left in that employee-month are removed
+ *    first, so a month is always booked from a clean slate, never on top;
+ *  - each advance gets at most one auto payment per month (also enforced by
+ *    the unique index idx_auto_once).
+ */
+function postMonth(db, mk) {
   const insPay = db.prepare(
     "INSERT INTO advance_payments (advance_id,date,amount,note,kind,mk) VALUES (?,?,?,?,?,?)"
   );
@@ -214,86 +240,72 @@ export function postRecoveries(mk, actor) {
     `INSERT INTO payroll_adjust (mk, emp_id, adv, adv_posted) VALUES (?,?,?,1)
      ON CONFLICT(mk, emp_id) DO UPDATE SET adv=excluded.adv, adv_posted=1`
   );
-  const autoPaidStmt = db.prepare(
+  const autoPaid = db.prepare(
     `SELECT COALESCE(SUM(ap.amount),0) AS s FROM advance_payments ap
-       JOIN advances a ON a.id = ap.advance_id
-      WHERE a.emp_id = ? AND ap.kind = 'auto' AND ap.mk = ?`
+       JOIN advances a ON a.id = ap.advance_id WHERE a.emp_id = ? AND ap.kind = 'auto' AND ap.mk = ?`
   );
-  const clearStale = db.prepare(
-    "UPDATE payroll_adjust SET adv = NULL, adv_posted = 0 WHERE mk = ? AND emp_id = ?"
+  const clearMonth = db.prepare(
+    "DELETE FROM advance_payments WHERE kind='auto' AND mk=? AND advance_id IN (SELECT id FROM advances WHERE emp_id=?)"
   );
+  const clearFlag = db.prepare("UPDATE payroll_adjust SET adv_posted = 0 WHERE mk = ? AND emp_id = ?");
   let posted = 0;
-  db.exec("BEGIN");
-  try {
-    for (const emp of employeesForMonth(mk)) {
-      const adj = getAdjust(mk, emp.id);
-      if (adj && adj.adv_posted) {
-        // A month flagged "posted" must have actual auto-payments behind it.
-        // If it has none, the advance it recovered was later deleted and this
-        // flag is stale — clear it so the current open advances can recover.
-        if (autoPaidStmt.get(emp.id, mk).s > 0) continue; // genuinely posted
-        clearStale.run(mk, emp.id);
-      }
-      let amt = recoveryFor(emp.id, mk);
-      if (amt <= 0) continue;
-      let applied = 0;
-      for (const a of openAdvances(emp.id)) {
-        if (amt <= 0) break;
-        const take = Math.min(a.balance, amt);
-        if (take > 0) {
-          insPay.run(a.id, monthEndStr(mk), take, "Salary recovery", "auto", mk);
-          amt -= take; applied += take;
-        }
-      }
-      if (applied > 0) { upAdj.run(mk, emp.id, applied); posted++; }
+  for (const emp of employeesForMonth(mk)) {
+    const adj = getAdjust(mk, emp.id);
+    if (adj && adj.adv_posted) {
+      if (autoPaid.get(emp.id, mk).s > 0) continue;   // genuinely booked
+      clearFlag.run(mk, emp.id);                      // stale flag (its advance was deleted)
     }
-    db.exec("COMMIT");
-  } catch (e) { db.exec("ROLLBACK"); throw e; }
+    clearMonth.run(mk, emp.id);                       // clean slate — never book on top
+    const advs = openAdvances(emp.id);
+    const takes = new Map();
+    if (adj && adj.adv != null) {
+      // A typed amount (✎): this month's own advances first, then the oldest open ones.
+      let left = adj.adv;
+      const order = [...advs.filter((a) => dueFromAdvance(a, mk) > 0), ...advs.filter((a) => dueFromAdvance(a, mk) <= 0)];
+      for (const a of order) { if (left <= 0) break; const t = Math.min(a.balance, left); if (t > 0) { takes.set(a.id, t); left -= t; } }
+    } else {
+      for (const a of advs) { const t = dueFromAdvance(a, mk); if (t > 0) takes.set(a.id, t); }
+    }
+    let applied = 0;
+    for (const [id, t] of takes) { insPay.run(id, monthEndStr(mk), t, "Salary recovery", "auto", mk); applied += t; }
+    if (applied > 0) { upAdj.run(mk, emp.id, applied); posted++; }
+  }
   return posted;
 }
 
-/** Book every due month's recoveries (idempotent; months already posted are skipped). */
-export function autoPostDue(actor) {
-  let posted = 0;
-  for (const mk of dueMonths()) posted += postRecoveries(mk, actor);
-  return posted;
+/** Book one month's recoveries (admin action / approval replay). */
+export function postRecoveries(mk, _actor) { return tx((db) => postMonth(db, mk)); }
+
+/** Book every due month's recoveries, oldest first, in one transaction (idempotent). */
+export function autoPostDue(_actor) {
+  return tx((db) => dueMonths().reduce((n, mk) => n + postMonth(db, mk), 0));
 }
-/**
- * An employee's advances changed: drop their auto recoveries in the automatic
- * months and book them again from the current advances, oldest month first.
- */
-export function rebookEmployee(empId, actor) {
-  const db = getDb();
-  const months = dueMonths();
-  db.exec("BEGIN");
-  try {
-    for (const mk of months) {
-      db.prepare(
-        "DELETE FROM advance_payments WHERE kind='auto' AND mk=? AND advance_id IN (SELECT id FROM advances WHERE emp_id=?)"
-      ).run(mk, empId);
-      db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0 WHERE mk=? AND emp_id=?").run(mk, empId);
-    }
-    db.exec("COMMIT");
-  } catch (e) { db.exec("ROLLBACK"); throw e; }
-  return autoPostDue(actor);
+
+/** An employee's advances changed: drop all their auto recoveries and book them again. */
+export function rebookEmployee(empId, _actor) {
+  return tx((db) => {
+    db.prepare("DELETE FROM advance_payments WHERE kind='auto' AND advance_id IN (SELECT id FROM advances WHERE emp_id=?)").run(empId);
+    db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0 WHERE emp_id=?").run(empId);
+    return dueMonths().reduce((n, mk) => n + postMonth(db, mk), 0);
+  });
 }
 
 /**
- * One-time switch to automatic recovery: drop every auto recovery booked in the
- * automatic months (by hand, under the old rule) and book them again by the
- * new rule, for all employees. Manual repayments are kept.
+ * One-time switch to automatic recovery: drop every salary recovery that was
+ * posted by hand (all months) and book them all again by the rule above, for
+ * all employees, in one transaction. Manual (cash) repayments are kept.
  */
-export function rebookAllDue(actor) {
-  const db = getDb();
-  db.exec("BEGIN");
-  try {
-    for (const mk of dueMonths()) {
-      db.prepare("DELETE FROM advance_payments WHERE kind='auto' AND mk=?").run(mk);
-      db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0 WHERE mk=?").run(mk);
-    }
-    db.exec("COMMIT");
-  } catch (e) { db.exec("ROLLBACK"); throw e; }
-  return autoPostDue(actor);
+export function rebookAllDue(_actor) {
+  return tx((db) => {
+    db.prepare("DELETE FROM advance_payments WHERE kind='auto'").run();
+    db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0").run();
+    return dueMonths().reduce((n, mk) => n + postMonth(db, mk), 0);
+  });
+}
+
+/** One auto recovery per advance per month, enforced by the database. */
+export function ensureAutoOnceIndex() {
+  getDb().exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_auto_once ON advance_payments(advance_id, mk) WHERE kind = 'auto'");
 }
 
 /** Undo a posted recovery for one employee this month. mode 'edit'|'delete'. */

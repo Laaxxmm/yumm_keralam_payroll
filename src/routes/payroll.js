@@ -76,6 +76,9 @@ router.put("/:mk/:empId", requireRole("admin", "hr"), (req, res) => {
   const parsed = AdjustSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const cur = getDb().prepare("SELECT * FROM payroll_adjust WHERE mk=? AND emp_id=?").get(mk, empId) || {};
+  // A booked recovery is changed through un-post (✎ / 🗑), never by overwriting the amount.
+  if (cur.adv_posted && "adv" in parsed.data)
+    return res.status(409).json({ error: "This month's recovery is already booked — use ✎ to change it." });
   // Setting week off or leaves means Work Days is computed from them, so clear
   // any direct wd override unless wd is explicitly given in the same request.
   const woLvGiven = "wo" in parsed.data || "lv" in parsed.data;
