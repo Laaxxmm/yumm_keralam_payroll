@@ -73,10 +73,11 @@ function slipPage(doc, r, bank, label) {
   pair("Employee ID", r.empCode, "Name", r.name);
   pair("Designation", r.desig, "Location", r.loc);
   pair("Date of Joining", r.joining, "Salary Date", r.salaryDate);
-  if (bank && bank.bank_name) {
-    cell(doc, SIDE, y, lw, rh, "Bank", { bold: true });
-    cell(doc, SIDE + lw, y, CONTENT_W - lw, rh, `${bank.bank_name}${bank.ifsc ? " / " + bank.ifsc : ""}`);
-    y += rh;
+  // Bank details. acc_no is present only for admin/hr (decrypted by the route);
+  // a viewer's slip has no account-number row at all.
+  if (bank && (bank.bank_name || bank.ifsc || bank.acc_no)) {
+    pair("Bank", bank.bank_name, "IFSC", bank.ifsc);
+    if (bank.acc_no) pair("Account No", bank.acc_no, "Account Holder", bank.acc_name);
   }
 
   // Attendance — one row of six figures
@@ -123,7 +124,7 @@ function slipPage(doc, r, bank, label) {
 /**
  * Write a PDF with one slip per row to `stream`.
  * @param rows     computeRow() results
- * @param banks    Map empId -> { bank_name, ifsc }
+ * @param banks    Map empId -> { bank_name, ifsc, acc_no?, acc_name } (acc_no only for admin/hr)
  * @param label    e.g. "October 2026"
  */
 export function writeSlipsPdf(stream, rows, banks, label) {

@@ -670,7 +670,8 @@ function slipBody(r, bank, label) {
       <tr>${L("Employee ID")}${V(r.empCode)}${L("Name")}${V(r.name)}</tr>
       <tr>${L("Designation")}${V(r.desig)}${L("Location")}${V(r.loc)}</tr>
       <tr>${L("Date of Joining")}${V(r.joining)}${L("Salary Date")}${V(r.salaryDate)}</tr>
-      ${bank.bankName ? `<tr>${L("Bank")}<td colspan="3" style="${P}">${esc(`${bank.bankName}${bank.ifsc ? " / " + bank.ifsc : ""}`)}</td></tr>` : ""}
+      ${bank.bankName || bank.ifsc || bank.accNo ? `<tr>${L("Bank")}${V(bank.bankName)}${L("IFSC")}${V(bank.ifsc)}</tr>` : ""}
+      ${bank.accNo ? `<tr>${L("Account No")}${V(bank.accNo)}${L("Account Holder")}${V(bank.accName)}</tr>` : ""}
     </table>
     <p style="margin:0 0 4px"><b>Attendance</b></p>
     <table style="margin-bottom:10px;font-size:11pt"><tr>

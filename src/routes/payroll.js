@@ -10,6 +10,7 @@ import {
 import { queueApproval } from "../services/approvals.js";
 import { parseAttendancePdf } from "../services/attendance.js";
 import { writeSlipsPdf } from "../services/slipPdf.js";
+import { decryptField } from "../crypto.js";
 
 const router = Router();
 const MK_RE = /^\d{4}-(?:[0-9]|1[01])$/; // YYYY-monthIndex(0..11)
@@ -53,7 +54,12 @@ router.get("/:mk/slips.pdf", (req, res) => {
   const emps = ids.length ? ids.map((id) => all.get(id)).filter(Boolean) : [...all.values()];
   if (!emps.length) return res.status(404).json({ error: "No employees on that month's payroll." });
   const rows = emps.map((e) => computeRow(e, mk, basis));
-  const banks = new Map(emps.map((e) => [e.id, { bank_name: e.bank_name, ifsc: e.ifsc }]));
+  // Account numbers are decrypted only for admin/hr — a viewer never gets them, in JSON or in a PDF.
+  const canSeeAcc = req.user.role === "admin" || req.user.role === "hr";
+  const banks = new Map(emps.map((e) => [e.id, {
+    bank_name: e.bank_name, ifsc: e.ifsc, acc_name: e.acc_name,
+    ...(canSeeAcc ? { acc_no: decryptField(e.acc_no_enc) } : {}),
+  }]));
   const label = monthLabel(mk);
   const file = rows.length === 1 ? `SalarySlip_${rows[0].name}_${label}` : `SalarySlips_${label}`;
   res.setHeader("Content-Type", "application/pdf");
