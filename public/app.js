@@ -561,14 +561,14 @@ function filteredSortedPayRows() {
     if (q && !(`${r.name} ${r.empCode || ""} ${r.desig} ${r.loc}`.toLowerCase().includes(q))) return false;
     return true;
   });
-  return applySort(list, state.paySort, (r, k) => r[k], ["salary", "salaryDate", "wo", "lv", "wd", "earned", "bonus", "ded", "rec", "net"]);
+  return applySort(list, state.paySort, (r, k) => r[k], ["salary", "salaryDate", "wo", "lv", "wd", "paidDays", "earned", "woBonus", "bonus", "ded", "rec", "net"]);
 }
 /** Render the payroll table body/footer from the current filter+sort state
  *  (no refetch — reuses the last payData). Totals reflect the shown rows. */
 function renderPayTable() {
   if (!payData) return;
   const w = canWrite();
-  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type to override). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. <b>Advances are deducted automatically</b> in full in the month they are given (from Oct 2026, an advance with an installment is deducted by that installment each month instead). Salary is as it was that month.`;
+  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type the week offs actually taken). From Oct 2026 <b>unused week offs are paid as WO Bonus</b> (only 1 of 4 taken in a 30-day month → Paid Days 33; with attendance, up to 4 absences count as week offs). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. <b>Advances are deducted automatically</b> in full in the month they are given (from Oct 2026, an advance with an installment is deducted by that installment each month instead). Salary is as it was that month.`;
   const rows = filteredSortedPayRows();
   $("payBody").innerHTML = rows.map((r) => {
     const recCell = r.advPosted
@@ -583,15 +583,17 @@ function renderPayTable() {
       <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.woSet ? r.wo : ""}" placeholder="${r.wo}" data-adj="wo" data-id="${r.id}" title="${r.woSet ? "Typed week off. Clear the box to go back to automatic (" + r.woAuto + ")." : "Automatic: " + r.woAuto + " (4 per month, pro-rated for joining/leaving). Type to override."}">` : r.wo}</td>
       <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.lv || ""}" placeholder="0" data-adj="lv" data-id="${r.id}">` : r.lv}</td>
       <td class="num">${w ? `<input class="wd-input" type="number" min="0" step="0.5" value="${r.wd}" data-adj="wd" data-id="${r.id}" title="${r.availDays !== r.bd ? `Payable days ${r.availDays} (joined/left mid-month; base ${r.bd})` : `Base ${r.bd}`} − week off − leaves. Type to override.">` : r.wd}</td>
+      <td class="num" title="${r.woUnused ? `Includes ${r.woUnused} unused week off(s) paid as bonus` : ""}">${r.paidDays}</td>
       <td class="num">${fmt(r.earned)}</td>
+      <td class="num" title="${r.woUnused ? `${r.woUnused} unused week off(s) × ₹${fmt(Math.round(r.salary / r.bd))}/day` : "All week offs taken"}">${fmt(r.woBonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.bonus || ""}" placeholder="0" data-adj="bonus" data-id="${r.id}">` : fmt(r.bonus)}</td>
       <td class="num">${w ? `<input class="adj-input" type="number" min="0" value="${r.ded || ""}" placeholder="0" data-adj="ded" data-id="${r.id}">` : fmt(r.ded)}</td>
       <td class="num">${recCell}</td><td class="num net">${fmt(r.net)}</td>
       <td><button class="icon-btn" data-slip="${r.id}" title="Salary Slip (Word)">🧾</button></td></tr>`;
-  }).join("") || `<tr><td colspan="16" class="empty">No employees match.</td></tr>`;
-  const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
-  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="10">TOTAL — ${rows.length} employees</td>
-    <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td><td></td></tr>` : "";
+  }).join("") || `<tr><td colspan="18" class="empty">No employees match.</td></tr>`;
+  const t = rows.reduce((t, r) => ({ earned: t.earned + r.earned, woBonus: t.woBonus + r.woBonus, bonus: t.bonus + r.bonus, ded: t.ded + r.ded, rec: t.rec + r.rec, net: t.net + r.net }), { earned: 0, woBonus: 0, bonus: 0, ded: 0, rec: 0, net: 0 });
+  $("payFoot").innerHTML = rows.length ? `<tr><td colspan="11">TOTAL — ${rows.length} employees</td>
+    <td class="num">${fmt(t.earned)}</td><td class="num">${fmt(t.woBonus)}</td><td class="num">${fmt(t.bonus)}</td><td class="num">${fmt(t.ded)}</td><td class="num">${fmt(t.rec)}</td><td class="num net">${fmt(t.net)}</td><td></td></tr>` : "";
   markSorted("#view-pay", state.paySort);
 }
 $("payBody").addEventListener("change", async (e) => {
@@ -622,11 +624,11 @@ $("payBody").addEventListener("click", async (e) => {
 });
 function payExportRows() {
   const bankOf = (id) => state.employees.find((e) => e.id === id) || {};
-  const rows = [["Employee ID","Name","Designation","Loc","Pay Date","Joining","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",
+  const rows = [["Employee ID","Name","Designation","Loc","Pay Date","Joining","Salary","Week Off","Leaves","Work Days","Paid Days","Earned","WO Bonus","Bonus","Other Ded.","Adv. Recovery","Net",
     "Bank Name","Account Holder","Account Number","IFSC","UPI"]];
   filteredSortedPayRows().forEach((r) => {
     const b = bankOf(r.id);
-    rows.push([r.empCode || "", r.name, r.desig, r.loc, r.salaryDate || "", r.joining || "", r.salary, r.wo, r.lv, r.wd, r.earned, r.bonus, r.ded, r.rec, r.net,
+    rows.push([r.empCode || "", r.name, r.desig, r.loc, r.salaryDate || "", r.joining || "", r.salary, r.wo, r.lv, r.wd, r.paidDays, r.earned, r.woBonus, r.bonus, r.ded, r.rec, r.net,
       b.bankName || "", b.accName || "", b.accNo || "", b.ifsc || "", b.upi || ""]);
   });
   return rows;
@@ -649,10 +651,11 @@ function slipBody(r, bank, label) {
     </table>
     <table>
       ${line("Base Days", r.bd, "Monthly Salary", fmt(r.salary))}
-      ${line("Week Off (paid)", r.wo, "Earned", fmt(r.earned))}
+      ${line("Week Off taken (paid)", r.wo, "Earned", fmt(r.earned))}
+      ${line("Unused Week Off", r.woUnused || 0, "+ WO Bonus", fmt(r.woBonus || 0))}
       ${line("Leaves", r.lv, "+ Bonus", fmt(r.bonus))}
       ${line("Work Days", r.wd, "− Other Deductions", fmt(r.ded))}
-      ${line("", "", "− Advance Recovery", fmt(r.rec))}
+      ${line("Paid Days", r.paidDays, "− Advance Recovery", fmt(r.rec))}
       <tr><td class="lbl" style="font-size:14pt">NET PAYABLE</td>
         <td colspan="3" style="text-align:right;font-weight:bold;font-size:14pt">₹ ${fmt(r.net)}</td></tr>
     </table>

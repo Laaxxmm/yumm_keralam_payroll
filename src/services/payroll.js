@@ -146,6 +146,15 @@ export function employedDays(emp, mk) {
 }
 const half = (x) => Math.round(x * 2) / 2;
 
+/**
+ * Week-off bonus (October 2026 = "2026-9" onward): the 4 week offs a month
+ * (pro-rated) are an entitlement; any not taken are paid as extra days, shown
+ * separately as WO Bonus. 30-day month, 1 week off taken → 3 unused →
+ * paid days 33. With attendance present days P: up to 4 absences count as
+ * week offs, the rest as unpaid leave → paid days = P + entitlement.
+ */
+export const WO_BONUS_FROM = "2026-9";
+
 export function computeRow(emp, mk, basis) {
   const bd = baseDaysFor(mk, basis);
   const adj = getAdjust(mk, emp.id);
@@ -156,14 +165,28 @@ export function computeRow(emp, mk, basis) {
   // Week off (paid): a typed value wins; otherwise 4 per month, pro-rated.
   const woAuto = Math.round(WEEK_OFF_PER_MONTH * frac);
   const wo = woSet ? adj.wo || 0 : woAuto;
-  const lv = adj ? (adj.lv || 0) : 0;   // leave days (unpaid)
+  const typedLv = adj ? (adj.lv || 0) : 0;   // leave days (unpaid)
   const override = adj && adj.wd != null;
-  // Work Days shown = payable days − week off − leaves (actual days worked), unless
-  // a direct wd override is set (e.g. attendance import = present days).
-  const wd = override ? adj.wd : Math.max(0, avail - wo - lv);
-  // Pay: week off is PAID, so only leaves reduce it — paid days = payable days − leaves.
-  // With a direct override, pay follows the override (present days).
-  const paidDays = override ? adj.wd : Math.max(0, avail - lv);
+  const woBonusRule = mkNum(mk) >= mkNum(WO_BONUS_FROM);
+  let woTaken = wo, lv = typedLv, wd, payDays, woUnused = 0;
+  if (woBonusRule) {
+    if (override) {
+      // Attendance / typed present days: absences up to the entitlement are week offs, the rest leave.
+      const absent = Math.max(0, avail - adj.wd);
+      woTaken = Math.min(woAuto, absent);
+      lv = Math.max(0, absent - woAuto);
+      wd = adj.wd;
+    } else {
+      wd = Math.max(0, avail - wo - lv);
+    }
+    woUnused = Math.max(0, woAuto - woTaken);
+    payDays = Math.max(0, avail - lv);           // salary days (week offs taken are paid)
+  } else {
+    // Before Oct 2026: Work Days = payable days − week off − leaves; an override is present days and drives pay.
+    wd = override ? adj.wd : Math.max(0, avail - wo - lv);
+    payDays = override ? adj.wd : Math.max(0, avail - lv);
+  }
+  const paidDays = payDays + woUnused;           // e.g. 30 + 3 unused week offs = 33
   const bonus = adj ? adj.bonus : 0;
   const ded = adj ? adj.ded : 0;
   // Pay the month with the salary/designation that was in force THAT month —
@@ -171,12 +194,14 @@ export function computeRow(emp, mk, basis) {
   const monthEnd = monthRangeIso(mk).end;
   const salary = fieldAsOf(emp.id, "salary", monthEnd, emp.salary || 0);
   const desig = fieldAsOf(emp.id, "desig", monthEnd, emp.desig);
-  const earned = Math.round((salary || 0) * (paidDays / bd));
+  const earned = Math.round((salary || 0) * (payDays / bd));
+  const woBonus = Math.round((salary || 0) * (woUnused / bd));
   const rec = recoveryFor(emp.id, mk);
-  const net = earned + bonus - ded - rec;
+  const net = earned + woBonus + bonus - ded - rec;
   return {
     id: emp.id, empCode: emp.emp_code || "", name: emp.name, desig, loc: emp.loc, salary, salaryDate: emp.salary_date || "", joining: emp.joining || "",
-    wd, wo, lv, bd, earned, bonus, ded, rec, net,
+    wd, wo: woTaken, lv, bd, earned, bonus, ded, rec, net,
+    woUnused, woBonus, paidDays,
     woSet, woAuto, availDays: avail,
     wdOverride: adj ? adj.wd : null,
     advPosted: !!(adj && adj.adv_posted), advOverride: adj ? adj.adv : null,

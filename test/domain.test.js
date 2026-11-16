@@ -358,3 +358,37 @@ test("no duplicate recoveries: repeated loads, ledger deletes, re-booking", asyn
   assert.equal(await octRec(), 1700);
   assert.equal((await perAdvMonth()).octTotal, 1700);
 });
+
+test("week-off bonus (Oct 2026+): unused week offs paid as WO Bonus; attendance absences → week offs first", async () => {
+  const mk = "2026-9"; // October 2026; basis 30 → base 30 days
+  const eid = (await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "WO Bonus", salary: 30000, status: "Active", joining: "01.01.2026" }) })).json()).id;
+  const row = async (m = mk) => (await (await api(`/api/payroll/${m}?basis=30`)).json()).rows.find((r) => r.id === eid);
+  const put = (body, m = mk) => api(`/api/payroll/${m}/${eid}`, { method: "PUT", body: JSON.stringify(body) });
+  const pick = (r) => [r.wo, r.woUnused, r.wd, r.paidDays, r.earned, r.woBonus, r.net];
+
+  // Automatic: all 4 week offs taken → no bonus
+  assert.deepEqual(pick(await row()), [4, 0, 26, 30, 30000, 0, 30000]);
+
+  // Only 1 of 4 taken → 3 unused → paid days 33, ₹3,000 WO bonus
+  await put({ wo: 1 });
+  assert.deepEqual(pick(await row()), [1, 3, 29, 33, 30000, 3000, 33000]);
+
+  // Leaves still cut pay, bonus unchanged
+  await put({ lv: 2 });
+  assert.deepEqual(pick(await row()), [1, 3, 27, 31, 28000, 3000, 31000]);
+
+  // Attendance: present 29 → 1 absence = 1 week off taken → 33 paid days
+  await put({ wd: 29 });
+  let r = await row();
+  assert.deepEqual([r.wo, r.lv, r.woUnused, r.paidDays, r.earned, r.woBonus], [1, 0, 3, 33, 30000, 3000]);
+
+  // Attendance: present 24 → 6 absences = 4 week offs + 2 leave → 28 paid days, no bonus
+  await put({ wd: 24 });
+  r = await row();
+  assert.deepEqual([r.wo, r.lv, r.woUnused, r.paidDays, r.earned, r.woBonus], [4, 2, 0, 28, 28000, 0]);
+
+  // September (before the rule): a typed 1 week off earns no bonus
+  await put({ wo: 1 }, "2026-8");
+  r = await row("2026-8");
+  assert.deepEqual([r.woBonus, r.paidDays, r.earned], [0, 30, 30000]);
+});

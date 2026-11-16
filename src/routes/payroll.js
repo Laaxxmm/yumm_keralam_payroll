@@ -45,10 +45,10 @@ router.get("/:mk", (req, res) => {
   const rows = employeesForMonth(mk).map((e) => computeRow(e, mk, basis));
   const totals = rows.reduce(
     (t, r) => ({
-      earned: t.earned + r.earned, bonus: t.bonus + r.bonus, ded: t.ded + r.ded,
+      earned: t.earned + r.earned, woBonus: t.woBonus + r.woBonus, bonus: t.bonus + r.bonus, ded: t.ded + r.ded,
       rec: t.rec + r.rec, net: t.net + r.net,
     }),
-    { earned: 0, bonus: 0, ded: 0, rec: 0, net: 0 }
+    { earned: 0, woBonus: 0, bonus: 0, ded: 0, rec: 0, net: 0 }
   );
   const pending = rows.filter((r) => !r.advPosted && r.rec > 0).length;
   res.json({ mk, label: monthLabel(mk), baseDays: baseDaysFor(mk, basis), basis, rows, totals, pending });
