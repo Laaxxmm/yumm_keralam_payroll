@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { createApp } from "./app.js";
+import path from "node:path";
 import { openDb, getDb } from "./db.js";
+import { rebookAllDue } from "./services/payroll.js";
 import { loadKey } from "./crypto.js";
 import { createUser } from "./auth.js";
 
@@ -42,8 +44,26 @@ if (process.env.NODE_ENV === "production" && !process.env.TRUST_PROXY_OK) {
   console.warn("[warn] NODE_ENV=production — ensure the app sits behind HTTPS.");
 }
 
+/**
+ * One-time step for automatic advance recovery: re-book Oct 2026 onward by the
+ * new rule (recoveries there were posted by hand, sometimes in the wrong month).
+ * A full copy of the database is taken first. Runs once, recorded in app_meta.
+ */
+function switchToAutoRecovery() {
+  const KEY = "auto_recovery_v1";
+  const db = getDb();
+  if (db.prepare("SELECT 1 FROM app_meta WHERE key = ?").get(KEY)) return;
+  const file = process.env.DB_FILE || "./data/yumm-hr.db";
+  const backup = path.join(path.dirname(file), `yumm-hr-before-auto-recovery-${Date.now()}.db`);
+  db.prepare("VACUUM INTO ?").run(backup);
+  const posted = rebookAllDue(null);
+  db.prepare("INSERT INTO app_meta (key, value) VALUES (?, ?)").run(KEY, `re-booked ${posted} employee-months; backup ${path.basename(backup)}`);
+  console.log(`[auto-recovery] re-booked ${posted} employee-month(s) from Oct 2026; backup at ${backup}`);
+}
+
 openDb();
 await bootstrapAdmin();
+switchToAutoRecovery();
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || "0.0.0.0"; // bind all interfaces so the cloud proxy can reach us
 createApp().listen(port, host, () => {

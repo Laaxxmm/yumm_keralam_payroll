@@ -519,7 +519,6 @@ function initPayControls() {
   $("payYear").addEventListener("change", renderPayroll);
   $("basisGroup").addEventListener("click", (e) => { const p = e.target.closest(".pill"); if (!p) return;
     state.basis = p.dataset.b; document.querySelectorAll("#basisGroup .pill").forEach((x) => x.classList.toggle("active", x === p)); renderPayroll(); });
-  $("btnPostRec").addEventListener("click", postRecoveries);
   $("btnExportPay").addEventListener("click", () => { if (payData) downloadCSV(payFileBase() + ".csv", payExportRows()); });
   $("btnExportPayXlsx").addEventListener("click", () => { if (payData) downloadXLSX(payFileBase() + ".xlsx", "Payroll", payExportRows()); });
   $("btnSlips").addEventListener("click", () => { if (payData) slipsAll(); });
@@ -569,10 +568,7 @@ function filteredSortedPayRows() {
 function renderPayTable() {
   if (!payData) return;
   const w = canWrite();
-  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type to override). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. Salary is as it was that month.`;
-  $("recBanner").innerHTML = payData.pending && w
-    ? `<div style="background:rgba(255,176,61,.1);border:1px solid #4a3a20;color:var(--brand2);padding:9px 13px;border-radius:8px;margin-bottom:12px">⚠ ${payData.pending} recovery(ies) not yet posted. <button class="btn sm" id="bannerPost">Post Recoveries</button></div>` : "";
-  if ($("bannerPost")) $("bannerPost").addEventListener("click", postRecoveries);
+  $("basisNote").innerHTML = `Earned = Salary ÷ <b>${payData.baseDays}</b> × (payable days − Leaves). <b>Week off is paid</b> — only Leaves reduce pay. Work Days = payable days − Week Off − Leaves. <b>Week off fills automatically: 4 a month</b> (grey = automatic; type to override). Mid-month joiners/leavers: payable days and week off are pro-rated to the days employed. <b>Advances are deducted automatically</b> (from Oct 2026) in the month they are given — in full, or the installment each month. Salary is as it was that month.`;
   const rows = filteredSortedPayRows();
   $("payBody").innerHTML = rows.map((r) => {
     const recCell = r.advPosted
@@ -614,11 +610,6 @@ $("payBody").addEventListener("click", async (e) => {
     toast(r && r.queued ? "✋ Sent for admin approval" : "Done"); renderPayroll(); }
   catch (err) { toast(err.error, true); }
 });
-async function postRecoveries() {
-  try { const r = await api(`/api/payroll/${mk()}/post-recoveries`, { method: "POST", body: {} });
-    toast(r.queued ? "✋ Sent for admin approval" : r.posted ? `Posted for ${r.posted} employee(s)` : "Nothing to post — set installments"); renderPayroll(); }
-  catch (e) { toast(e.error, true); }
-}
 function payExportRows() {
   const bankOf = (id) => state.employees.find((e) => e.id === id) || {};
   const rows = [["Employee ID","Name","Designation","Loc","Pay Date","Joining","Salary","Week Off","Leaves","Work Days","Earned","Bonus","Other Ded.","Adv. Recovery","Net",

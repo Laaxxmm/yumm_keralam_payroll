@@ -5,7 +5,7 @@ import { getDb, audit } from "../db.js";
 import { requireRole } from "../auth.js";
 import {
   employeesForMonth, computeRow, baseDaysFor, monthLabel,
-  postRecoveries, unpostRecovery,
+  postRecoveries, unpostRecovery, autoPostDue,
 } from "../services/payroll.js";
 import { queueApproval } from "../services/approvals.js";
 import { parseAttendancePdf } from "../services/attendance.js";
@@ -41,6 +41,7 @@ router.get("/:mk", (req, res) => {
   const mk = req.params.mk;
   if (!MK_RE.test(mk)) return res.status(400).json({ error: "Bad month key." });
   const basis = ["cal", "30", "26"].includes(req.query.basis) ? req.query.basis : "cal";
+  autoPostDue(req.user); // advances are deducted automatically — no manual posting step
   const rows = employeesForMonth(mk).map((e) => computeRow(e, mk, basis));
   const totals = rows.reduce(
     (t, r) => ({

@@ -80,11 +80,37 @@ export function getAdjust(mk, empId) {
   return getDb().prepare("SELECT * FROM payroll_adjust WHERE mk = ? AND emp_id = ?").get(mk, empId) || null;
 }
 
+/*
+ * Automatic advance recovery (October 2026 = "2026-9" onward): an advance is
+ * deducted in the payroll of the month it was given — in full when it has no
+ * installment, otherwise its installment each month from that month on — and
+ * the deduction is booked against the advance without a manual "post" step.
+ * Earlier months keep the old rules (installment only, posted by hand) so
+ * payroll that was already paid never changes.
+ */
+export const AUTO_RECOVERY_FROM = "2026-9";
+const mkNum = (mk) => { const p = mkParts(mk); return p.y * 12 + p.m; };
+export function autoRecoveryApplies(mk) { return mkNum(mk) >= mkNum(AUTO_RECOVERY_FROM); }
+/** Payroll month key of a dd.mm.yyyy date, or null. */
+export function mkOfDate(s) { const iso = dmyToIso(s); return iso ? `${+iso.slice(0, 4)}-${+iso.slice(5, 7) - 1}` : null; }
+/** The current month in India (IST), as a month key. */
+export function currentMk() { const d = new Date(Date.now() + 5.5 * 3600e3); return `${d.getUTCFullYear()}-${d.getUTCMonth()}`; }
+/** Months whose recoveries are due now: AUTO_RECOVERY_FROM .. current month. */
+export function dueMonths() {
+  const out = [], end = mkNum(currentMk());
+  for (let n = mkNum(AUTO_RECOVERY_FROM); n <= end; n++) out.push(`${Math.floor(n / 12)}-${n % 12}`);
+  return out;
+}
+
 /** Scheduled recovery for a month: sum over open advances of min(installment, balance). */
 export function schedRecovery(empId, mk) {
   let total = 0;
+  const auto = autoRecoveryApplies(mk);
   for (const a of openAdvances(empId)) {
-    const inst = a.installment || 0;
+    const issued = mkOfDate(a.date);
+    if (auto && issued && mkNum(issued) > mkNum(mk)) continue; // given after this month
+    // No installment: from Oct 2026, deducted in full in the month it was given.
+    const inst = a.installment > 0 ? a.installment : auto && issued === mk ? Infinity : 0;
     if (inst <= 0) continue;
     const already = getDb()
       .prepare("SELECT COALESCE(SUM(amount),0) AS s FROM advance_payments WHERE advance_id=? AND kind='auto' AND mk=?")
@@ -224,6 +250,50 @@ export function postRecoveries(mk, actor) {
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
   return posted;
+}
+
+/** Book every due month's recoveries (idempotent; months already posted are skipped). */
+export function autoPostDue(actor) {
+  let posted = 0;
+  for (const mk of dueMonths()) posted += postRecoveries(mk, actor);
+  return posted;
+}
+/**
+ * An employee's advances changed: drop their auto recoveries in the automatic
+ * months and book them again from the current advances, oldest month first.
+ */
+export function rebookEmployee(empId, actor) {
+  const db = getDb();
+  const months = dueMonths();
+  db.exec("BEGIN");
+  try {
+    for (const mk of months) {
+      db.prepare(
+        "DELETE FROM advance_payments WHERE kind='auto' AND mk=? AND advance_id IN (SELECT id FROM advances WHERE emp_id=?)"
+      ).run(mk, empId);
+      db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0 WHERE mk=? AND emp_id=?").run(mk, empId);
+    }
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  return autoPostDue(actor);
+}
+
+/**
+ * One-time switch to automatic recovery: drop every auto recovery booked in the
+ * automatic months (by hand, under the old rule) and book them again by the
+ * new rule, for all employees. Manual repayments are kept.
+ */
+export function rebookAllDue(actor) {
+  const db = getDb();
+  db.exec("BEGIN");
+  try {
+    for (const mk of dueMonths()) {
+      db.prepare("DELETE FROM advance_payments WHERE kind='auto' AND mk=?").run(mk);
+      db.prepare("UPDATE payroll_adjust SET adv=NULL, adv_posted=0 WHERE mk=?").run(mk);
+    }
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  return autoPostDue(actor);
 }
 
 /** Undo a posted recovery for one employee this month. mode 'edit'|'delete'. */

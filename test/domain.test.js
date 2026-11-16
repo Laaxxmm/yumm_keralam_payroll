@@ -37,6 +37,11 @@ test("company profile round-trips", async () => {
   assert.equal(c.company.gstin, "22AAAAA0000A1Z5");
 });
 
+// From Oct 2026 installments are booked automatically each month; these July
+// tests subtract whatever the automatic months took, so they hold on any date.
+const autoTaken = async (advId) => (await (await api(`/api/advances/${advId}/ledger`)).json())
+  .payments.filter((p) => p.kind === "auto" && p.mk !== "2026-6").reduce((s, p) => s + p.amount, 0);
+
 test("advance recovery: post reduces balance and net", async () => {
   // 6000 advance, 500/month installment
   const adv = await (await api("/api/advances", { method: "POST", body: JSON.stringify({ empId, amount: 6000, installment: 500, reason: "Medical", date: "01.07.2026" }) })).json();
@@ -51,8 +56,8 @@ test("advance recovery: post reduces balance and net", async () => {
 
   await api(`/api/payroll/${mk}/post-recoveries`, { method: "POST", body: "{}" });
   const led = await (await api(`/api/advances/${adv.id}/ledger`)).json();
-  assert.equal(led.advance.balance, 5500);
-  assert.equal(led.payments.filter((p) => p.kind === "auto").length, 1);
+  assert.equal(led.advance.balance, 5500 - await autoTaken(adv.id));
+  assert.equal(led.payments.filter((p) => p.kind === "auto" && p.mk === mk).length, 1);
 
   const after = await (await api(`/api/payroll/${mk}?basis=cal`)).json();
   assert.equal(after.rows.find((r) => r.id === empId).advPosted, true);
@@ -64,7 +69,7 @@ test("advance recovery: unpost restores balance", async () => {
   await api(`/api/payroll/${mk}/unpost/${empId}`, { method: "POST", body: JSON.stringify({ mode: "delete" }) });
   const advs = await (await api("/api/advances")).json();
   const a = advs.advances.find((x) => x.empId === empId);
-  assert.equal(a.balance, 6000); // fully restored
+  assert.equal(a.balance, 6000 - await autoTaken(a.id)); // July fully restored
   const after = await (await api(`/api/payroll/${mk}?basis=cal`)).json();
   assert.equal(after.rows.find((r) => r.id === empId).net, 14000);
 });
@@ -73,11 +78,12 @@ test("manual repayment reduces balance; deleting it restores", async () => {
   const advs = await (await api("/api/advances")).json();
   const a = advs.advances.find((x) => x.empId === empId);
   const pay = await (await api(`/api/advances/${a.id}/payments`, { method: "POST", body: JSON.stringify({ amount: 1000, note: "Cash", date: "05.07.2026" }) })).json();
-  assert.equal(pay.balance, 5000);
+  const auto = await autoTaken(a.id);
+  assert.equal(pay.balance, 5000 - auto);
   const led = await (await api(`/api/advances/${a.id}/ledger`)).json();
   const manual = led.payments.find((p) => p.kind === "manual");
   const del = await (await api(`/api/advances/${a.id}/payments/${manual.id}`, { method: "DELETE" })).json();
-  assert.equal(del.balance, 6000);
+  assert.equal(del.balance, 6000 - auto);
 });
 
 test("payroll basis 30 halves earned at 15 working days", async () => {
@@ -277,4 +283,37 @@ test("employee ID (Petpooja ID): blank by default, editable, unique, set via emp
   assert.equal((await setCode(a, "")).status, 200);
   assert.equal((await setCode(b, "")).status, 200);
   assert.equal((await setCode(a, "bad id!")).status, 400);
+});
+
+test("automatic recovery (Oct 2026+): advance booked in its own month, no posting step", async () => {
+  const mk = "2026-9"; // October 2026
+  const eid = (await (await api("/api/employees", { method: "POST", body: JSON.stringify({ name: "Auto Rec", salary: 14000, status: "Active", joining: "01.01.2026" }) })).json()).id;
+  const row = async (m = mk) => (await (await api(`/api/payroll/${m}?basis=cal`)).json()).rows.find((r) => r.id === eid);
+  const advOf = async (id) => (await (await api("/api/advances")).json()).advances.find((a) => a.id === id);
+
+  // No installment → deducted in full from October, booked immediately
+  const a1 = (await (await api("/api/advances", { method: "POST", body: JSON.stringify({ empId: eid, amount: 500, date: "31.10.2026" }) })).json()).id;
+  let a = await advOf(a1);
+  assert.deepEqual([a.recovered, a.balance, a.open], [500, 0, false]);
+  let r = await row();
+  assert.deepEqual([r.rec, r.advPosted, r.net], [500, true, 13500]);
+  // September (before the automatic rule) is untouched
+  assert.equal((await row("2026-8")).rec, 0);
+
+  // Editing the amount re-books October
+  const cur = await advOf(a1);
+  await api(`/api/advances/${a1}`, { method: "PUT", body: JSON.stringify({ empId: eid, amount: 800, date: cur.date, reason: "", installment: 0 }) });
+  a = await advOf(a1);
+  assert.deepEqual([a.recovered, a.balance], [800, 0]);
+  assert.equal((await row()).rec, 800);
+
+  // Installment advance: only the installment comes off in October
+  const a2 = (await (await api("/api/advances", { method: "POST", body: JSON.stringify({ empId: eid, amount: 3000, installment: 1000, date: "10.10.2026" }) })).json()).id;
+  const oct = (await (await api(`/api/advances/${a2}/ledger`)).json()).payments.filter((p) => p.kind === "auto" && p.mk === mk);
+  assert.equal(oct.reduce((s, p) => s + p.amount, 0), 1000);
+  assert.equal((await row()).rec, 1800);   // 800 + 1000 installment
+
+  // Deleting an advance takes its deduction back out of October
+  await api(`/api/advances/${a1}`, { method: "DELETE" });
+  assert.equal((await row()).rec, 1000);
 });

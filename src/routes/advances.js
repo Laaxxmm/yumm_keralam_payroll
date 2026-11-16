@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { getDb, audit } from "../db.js";
 import { requireRole } from "../auth.js";
-import { advBalance, advPaid } from "../services/payroll.js";
+import { advBalance, advPaid, autoPostDue, rebookEmployee } from "../services/payroll.js";
 import { queueApproval } from "../services/approvals.js";
 
 const router = Router();
@@ -44,15 +44,19 @@ export function applyAdvCreate(a, req) {
     .prepare("INSERT INTO advances (emp_id,date,amount,reason,installment) VALUES (?,?,?,?,?)")
     .run(a.empId, a.date, a.amount, a.reason, a.installment);
   audit(req, "advance.create", "advance", info.lastInsertRowid, `emp ${a.empId} amt ${a.amount}`);
+  rebookEmployee(a.empId, req?.user); // deducted in that month's payroll straight away
   return Number(info.lastInsertRowid);
 }
 
 export function applyAdvUpdate(id, a, req) {
+  const before = getDb().prepare("SELECT emp_id FROM advances WHERE id=?").get(id);
   const info = getDb()
     .prepare("UPDATE advances SET emp_id=?,date=?,amount=?,reason=?,installment=? WHERE id=?")
     .run(a.empId, a.date, a.amount, a.reason, a.installment, id);
   if (!info.changes) { const e = new Error("Advance not found."); e.status = 404; throw e; }
   audit(req, "advance.update", "advance", id);
+  // Amount/date/installment/employee may have changed: re-book the affected employee(s).
+  for (const emp of new Set([before?.emp_id, a.empId].filter(Boolean))) rebookEmployee(emp, req?.user);
 }
 
 export function applyAdvDelete(id, req) {
@@ -84,6 +88,7 @@ export function applyAdvDelete(id, req) {
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
   audit(req, "advance.delete", "advance", id);
+  rebookEmployee(row.emp_id, req?.user);
 }
 
 export function applyPayAdd(id, p, req) {
@@ -114,7 +119,8 @@ export function applyPayDelete(id, payId, req) {
 
 /* --------------------------------- routes --------------------------------- */
 
-router.get("/", (_req, res) => {
+router.get("/", (req, res) => {
+  autoPostDue(req.user); // book any recovery that has fallen due (e.g. a new month's installments)
   const rows = getDb().prepare("SELECT * FROM advances ORDER BY id DESC").all();
   res.json({ advances: rows.map(advToApi) });
 });

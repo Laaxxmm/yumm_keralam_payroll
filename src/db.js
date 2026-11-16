@@ -89,6 +89,9 @@ function migrate(d) {
     CREATE INDEX IF NOT EXISTS idx_emp_status ON employees(status);
     CREATE INDEX IF NOT EXISTS idx_emp_loc ON employees(loc);
 
+    -- One-time data steps already done (key = step name).
+    CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT, done_at TEXT DEFAULT (datetime('now')));
+
     CREATE TABLE IF NOT EXISTS company (
       id          INTEGER PRIMARY KEY CHECK (id = 1),
       name        TEXT NOT NULL DEFAULT '',
